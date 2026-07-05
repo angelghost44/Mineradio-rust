@@ -6,6 +6,9 @@ use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 const MAX_RESTARTS: u32 = 3;
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -65,13 +68,17 @@ impl SidecarProcess {
             return Ok(());
         }
 
-        let mut child = Command::new(&self.node_path)
-            .arg("index.js")
+        let mut cmd = Command::new(&self.node_path);
+        cmd.arg("index.js")
             .current_dir(&self.sidecar_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
+            .stderr(Stdio::inherit());
+        #[cfg(target_os = "windows")]
+        {
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let mut child = cmd.spawn()
             .map_err(|e| format!("failed to start sidecar: {}", e))?;
 
         println!(
