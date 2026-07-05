@@ -155,6 +155,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::scan_folder,
             commands::extract_cover,
@@ -167,6 +168,7 @@ pub fn run() {
             crate::lyrics::set_lyrics_lock_state,
             crate::wallpaper::toggle_wallpaper_mode,
             crate::wallpaper::update_wallpaper_mode,
+            commands::pick_folder,
         ])
         .setup(|app| {
             let sidecar_dir = resolve_sidecar_dir();

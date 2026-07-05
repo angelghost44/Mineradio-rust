@@ -11,6 +11,7 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+const DETACHED_PROCESS: u32 = 0x00000008;
 
 const MAX_RESTARTS: u32 = 3;
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);
@@ -76,19 +77,13 @@ impl SidecarProcess {
             .current_dir(&self.sidecar_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::piped());
         #[cfg(target_os = "windows")]
         {
-            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
         }
         let mut child = cmd.spawn()
             .map_err(|e| format!("failed to start sidecar: {}", e))?;
-
-        println!(
-            "[Sidecar] started (PID: {}) at {}",
-            child.id(),
-            self.sidecar_dir.display()
-        );
 
         inner.stdin = child.stdin.take();
         inner.stdout = child.stdout.take();
@@ -107,7 +102,6 @@ impl SidecarProcess {
             inner.stdin = None;
             inner.stdout = None;
         }
-        println!("[Sidecar] stopped");
     }
 
     pub fn call(
@@ -151,13 +145,7 @@ impl SidecarProcess {
                     ));
                 }
                 *r += 1;
-                let attempt_num = *r;
                 drop(r);
-
-                eprintln!(
-                    "[Sidecar] error (attempt {}/{}): {} — restarting",
-                    attempt_num, MAX_RESTARTS, e
-                );
                 std::thread::sleep(Duration::from_millis(300));
                 self.stop();
                 self.start()?;

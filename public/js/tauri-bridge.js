@@ -144,6 +144,15 @@ window.MR = window.MR || {};
 
     updateWallpaperMode: function (payload) {
       return tauri.core.invoke('update_wallpaper_mode', { payload: payload || {} });
+    },
+
+    pickFolder: function () {
+      return tauri.core.invoke('pick_folder').then(function (folder) {
+        if (folder) {
+          return { ok: true, folder: folder, canceled: false };
+        }
+        return { ok: false, folder: null, canceled: true };
+      });
     }
   };
 })();
