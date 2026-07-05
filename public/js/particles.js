@@ -943,7 +943,7 @@ function buildSkullParticleGeometryFromAsset(points) {
 }
 
 function loadSkullParticleAsset() {
-  if (skullParticleAsset.data || skullParticleAsset.promise || skullParticleAsset.failed) return skullParticleAsset.promise || Promise.resolve(skullParticleAsset.data);
+  if (skullParticleAsset.data || skullParticleAsset.promise) return skullParticleAsset.promise || Promise.resolve(skullParticleAsset.data);
   if (typeof fetch !== 'function') {
     skullParticleAsset.failed = true;
     return Promise.resolve(null);
@@ -1331,7 +1331,7 @@ function applySkullCameraPose(dt) {
 }
 function updateSkullParticleLayer(dt) {
   var active = fx && fx.preset === SKULL_PRESET_INDEX;
-  if (active && !skullParticleAsset.data && !skullParticleAsset.failed) {
+  if (active && !skullParticleAsset.data && !skullParticleAsset.promise) {
     loadSkullParticleAsset();
     return;
   }
