@@ -1,5 +1,6 @@
 use crate::extractor::CoverData;
 use crate::scanner::ScannedFile;
+use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command]
@@ -24,9 +25,11 @@ pub fn sidecar_call(
 
 #[tauri::command]
 pub async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let window = app.get_webview_window("main").ok_or("no main window")?;
     let (tx, rx) = std::sync::mpsc::channel::<Option<tauri_plugin_dialog::FilePath>>();
     app.dialog()
         .file()
+        .set_parent(&window)
         .pick_folder(move |file_path| {
             let _ = tx.send(file_path);
         });

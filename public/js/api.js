@@ -27,7 +27,12 @@ async function apiJsonTauri(url, opts) {
     var u = new URL(url, window.location.origin);
     var pn = u.pathname;
     if (pn === '/api/local/scan') {
-      return await MR.invoke('scan_folder', { folder: u.searchParams.get('folder') || '' });
+      var scanFolder = u.searchParams.get('folder');
+      if (!scanFolder && opts && opts.body) {
+        try { scanFolder = JSON.parse(opts.body).folder; } catch(e) {}
+      }
+      var files = await MR.invoke('scan_folder', { folder: scanFolder || '' });
+      return { ok: true, files: files };
     }
     if (pn === '/api/local/cover') {
       var coverPath = u.searchParams.get('path') || '';
@@ -1143,24 +1148,29 @@ function queueLocalMusicIndex(idx) {
   if (!files || idx < 0 || idx >= files.length) return;
   var file = files[idx];
   var url = localAudioUrl(file.path);
-  var coverApi = window.location.origin + '/api/local/cover?path=' + encodeURIComponent(file.path);
   var song = hydrateCustomCover({
     type: 'local',
     name: file.name,
     artist: '本地文件',
-    cover: coverApi,
+    cover: '',
     localKey: 'scan:' + file.path,
     filePath: file.path,
     localUrl: url,
     size: file.size || 0,
     duration: 0,
   });
-  // 预加载封面缓存到服务端
-  fetch(coverApi, { method: 'HEAD' }).catch(function(){});
   playQueue.push(song);
   safeRenderQueuePanel('queue-local-song');
   safeShelfRebuild('queue-local-song');
   showToast('已添加到队列: ' + file.name);
+  // Load cover asynchronously
+  apiJson('/api/local/cover?path=' + encodeURIComponent(file.path), { _noTauri: false }).then(function(res){
+    var coverUrl = (res && res.data) ? res.data : '';
+    if (coverUrl) {
+      song.cover = coverUrl;
+      safeRenderQueuePanel('cover-ready');
+    }
+  }).catch(function(){});
 }
 function queueAllLocalMusic() {
   var files = localMusicState.files;
@@ -1168,35 +1178,45 @@ function queueAllLocalMusic() {
   for (var i = 0; i < files.length; i++) {
     var file = files[i];
     var url = localAudioUrl(file.path);
-    var coverApi = window.location.origin + '/api/local/cover?path=' + encodeURIComponent(file.path);
     var song = hydrateCustomCover({
       type: 'local',
       name: file.name,
       artist: '本地文件',
-      cover: coverApi,
+      cover: '',
       localKey: 'scan:' + file.path,
       filePath: file.path,
       localUrl: url,
       size: file.size || 0,
       duration: 0,
     });
-    fetch(coverApi, { method: 'HEAD' }).catch(function(){});
     playQueue.push(song);
   }
   safeRenderQueuePanel('queue-all-local');
   safeShelfRebuild('queue-all-local');
   showToast('已添加全部 ' + files.length + ' 首本地音乐到播放列表');
+  // Load covers asynchronously for visible items
+  var todo = files.length;
+  files.forEach(function(file, i){
+    apiJson('/api/local/cover?path=' + encodeURIComponent(file.path), { _noTauri: false }).then(function(res){
+      var coverUrl = (res && res.data) ? res.data : '';
+      if (coverUrl && playQueue[i]) {
+        playQueue[i].cover = coverUrl;
+      }
+      if (--todo === 0) safeRenderQueuePanel('covers-ready');
+    }).catch(function(){
+      if (--todo === 0) safeRenderQueuePanel('covers-ready');
+    });
+  });
 }
 function playLocalFile(file) {
   if (!file || !file.path) return;
   var url = localAudioUrl(file.path);
-  var coverApi = window.location.origin + '/api/local/cover?path=' + encodeURIComponent(file.path);
 
   var song = hydrateCustomCover({
     type: 'local',
     name: file.name,
     artist: '本地文件',
-    cover: coverApi,
+    cover: '',
     localKey: 'scan:' + file.path,
     filePath: file.path,
     localUrl: url,
@@ -1286,8 +1306,15 @@ function playLocalFile(file) {
     if (currentLocalSong && currentLocalSong.localUrl === url) prepareLocalBeatAnalysis(currentLocalSong, url);
   }, 520);
   // 封面: song.cover 已设为 coverApi, 传给 loadCoverFromUrl 走标准封面加载流程
-  if (file.path && coverApi) {
-    loadCoverFromUrl(coverApi, { trackToken: token, deferHeavy: firstVisualPlay, delay: firstVisualPlay ? 60 : 0, timeout: firstVisualPlay ? 400 : 200 });
+  if (file.path) {
+    apiJson('/api/local/cover?path=' + encodeURIComponent(file.path), { _noTauri: false }).then(function(res){
+      var coverUrl = (res && res.data) ? res.data : '';
+      if (coverUrl) {
+        song.cover = coverUrl;
+        loadCoverFromUrl(coverUrl, { trackToken: token, deferHeavy: firstVisualPlay, delay: firstVisualPlay ? 60 : 0, timeout: firstVisualPlay ? 400 : 200 });
+        safeRenderQueuePanel('cover-ready');
+      }
+    }).catch(function(){});
   }
 }
 function playLocalShuffle() {

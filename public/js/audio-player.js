@@ -1557,7 +1557,9 @@ function shuffleQueue() {
 }
 function clearQueue() {
   playQueue = []; currentIdx = -1;
-  safeRenderQueuePanel('clear-queue');
+  var ql = document.getElementById('queue-list');
+  if (ql) ql.innerHTML = '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">队列为空，点击 + 设为第一首</div>';
+  renderMiniQueuePanel();
   safeShelfRebuild('clear-queue');
   updateCustomCoverButton();
   updateCustomLyricControls();

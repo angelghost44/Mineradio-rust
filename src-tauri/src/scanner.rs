@@ -2,6 +2,9 @@ use serde::Serialize;
 use std::path::Path;
 use walkdir::WalkDir;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::fs::MetadataExt;
+
 const AUDIO_EXTENSIONS: &[&str] = &[
     ".mp3", ".flac", ".wav", ".ogg", ".m4a", ".aac", ".wma", ".opus", ".aiff", ".ape",
 ];
@@ -9,12 +12,21 @@ const AUDIO_EXTENSIONS: &[&str] = &[
 const MAX_DEPTH: usize = 20;
 const MAX_FILES: usize = 10000;
 
+#[cfg(target_os = "windows")]
+const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x00400000;
+
 #[derive(Debug, Serialize)]
 pub struct ScannedFile {
     pub name: String,
     pub path: String,
     pub size: u64,
     pub mtime_ms: u64,
+}
+
+#[cfg(target_os = "windows")]
+fn is_cloud_only(metadata: &std::fs::Metadata) -> bool {
+    let attrs = metadata.file_attributes();
+    attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS != 0
 }
 
 pub fn scan_folder(folder: &str) -> Result<Vec<ScannedFile>, String> {
@@ -42,6 +54,22 @@ pub fn scan_folder(folder: &str) -> Result<Vec<ScannedFile>, String> {
             continue;
         }
 
+        let metadata = match entry.metadata() {
+            Ok(m) => m,
+            _ => continue,
+        };
+
+        if !metadata.is_file() || metadata.len() == 0 {
+            continue;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            if is_cloud_only(&metadata) {
+                continue;
+            }
+        }
+
         let ext = entry
             .path()
             .extension()
@@ -51,15 +79,6 @@ pub fn scan_folder(folder: &str) -> Result<Vec<ScannedFile>, String> {
             AUDIO_EXTENSIONS.contains(&format!(".{}", e).as_str())
         });
         if !is_audio {
-            continue;
-        }
-
-        let metadata = match entry.metadata() {
-            Ok(m) => m,
-            _ => continue,
-        };
-
-        if !metadata.is_file() || metadata.len() == 0 {
             continue;
         }
 

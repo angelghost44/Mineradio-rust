@@ -2512,7 +2512,7 @@ function hideAIDepthChip() {
 
 function loadCoverFromUrl(directUrl, opts) {
   opts = opts || {};
-  if (!directUrl || typeof directUrl !== 'string' || !/^https?:\/\//i.test(directUrl)) {
+  if (!directUrl || typeof directUrl !== 'string' || (!/^https?:\/\//i.test(directUrl) && !/^data:/i.test(directUrl))) {
     if (!coverApplyStillCurrent(opts)) return;
     currentCoverSource = null;
     coverProcessToken++;
