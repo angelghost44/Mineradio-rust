@@ -11,7 +11,6 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const DETACHED_PROCESS: u32 = 0x00000008;
 
 const MAX_RESTARTS: u32 = 3;
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);
@@ -77,10 +76,10 @@ impl SidecarProcess {
             .current_dir(&self.sidecar_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::inherit());
         #[cfg(target_os = "windows")]
         {
-            cmd.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
+            cmd.creation_flags(CREATE_NO_WINDOW);
         }
         let mut child = cmd.spawn()
             .map_err(|e| format!("failed to start sidecar: {}", e))?;

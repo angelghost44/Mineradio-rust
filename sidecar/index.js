@@ -212,23 +212,30 @@ const handlers = {
   // ---- login ----
   async login_qr_key() {
     const res = await neteaseCall(login_qr_key, {});
-    return { unikey: res.body.unikey, code: res.body.code };
+    return { key: res.body.data.unikey, unikey: res.body.data.unikey, code: res.body.code };
   },
 
   async login_qr_create(params) {
     const key = params.key;
     const res = await neteaseCall(login_qr_create, { key, qrimg: true });
-    return { qrimg: res.body.data.qrimg, url: res.body.data.url, code: res.body.code };
+    return { img: res.body.data.qrimg, qrimg: res.body.data.qrimg, url: res.body.data.url, code: res.body.code };
   },
 
   async login_qr_check(params) {
     const key = params.key;
     const res = await neteaseCall(login_qr_check, { key });
     const body = res.body;
-    if (body.code >= 800 && body.code <= 803) {
-      if (res.cookie) writeCookie(res.cookie);
-    }
-    return { code: body.code, message: body.message || '', nickname: body.nickname || '', avatarUrl: body.avatarUrl || '' };
+    const authorized = body.code >= 800 && body.code <= 803;
+    if (authorized && res.cookie) writeCookie(res.cookie);
+    return {
+      code: body.code,
+      message: body.message || '',
+      nickname: body.nickname || '',
+      avatarUrl: body.avatarUrl || '',
+      loggedIn: body.code === 803 && !!res.cookie,
+      hasCookie: body.code === 803 && !!res.cookie,
+      pendingProfile: body.code === 803 && !res.cookie,
+    };
   },
 
   async login_status() {
