@@ -14,6 +14,7 @@ pub struct SidecarState(pub Mutex<sidecar_manager::SidecarProcess>);
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SidecarState(Mutex::new(
             sidecar_manager::SidecarProcess::new("node", "sidecar/index.js"),
         )))

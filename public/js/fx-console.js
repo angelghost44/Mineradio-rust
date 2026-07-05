@@ -2708,7 +2708,12 @@ function setUpdatePreviewVisible(visible) {
 
 async function checkLatestUpdate() {
   try {
-    var data = await apiJson('/api/update/latest?t=' + Date.now());
+    var data;
+    if (typeof MR !== 'undefined' && MR.sidecar) {
+      data = await MR.sidecar.call('check_update');
+    } else {
+      data = await apiJson('/api/update/latest?t=' + Date.now());
+    }
     applyLatestUpdateInfo(data);
   } catch (e) {
     updatePreviewState.preview = true;

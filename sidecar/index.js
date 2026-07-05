@@ -94,6 +94,33 @@ function qqFetch(pathname, searchParams) {
   });
 }
 
+// fetchJson — simple GET with UA
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const mod = u.protocol === 'https:' ? https : http;
+    mod.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': 'application/json' } }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch (e) { reject(new Error('fetchJson parse error')); }
+      });
+    }).on('error', reject);
+  });
+}
+
+// compareVersions — semver comparator
+function compareVersions(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0, nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
 // ---------- method dispatch ----------
 const handlers = {
 
@@ -455,6 +482,46 @@ const handlers = {
   async qq_logout() {
     writeQQCookie('');
     return { ok: true };
+  },
+
+  // ---- update check ----
+  async check_update() {
+    const pkg = {
+      version: '1.1.0',
+      mineradio: {
+        update: { provider: 'github', owner: 'XxHuberrr', repo: 'Mineradio', preview: true }
+      }
+    };
+    const cfg = (pkg.mineradio && pkg.mineradio.update) || {};
+    if (!cfg.owner || !cfg.repo) {
+      return { configured: false, preview: true, currentVersion: pkg.version };
+    }
+    try {
+      const apiUrl = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/releases/latest`;
+      const data = await fetchJson(apiUrl);
+      const latestTag = (data.tag_name || '').replace(/^v/, '');
+      const current = pkg.version;
+      const hasUpdate = compareVersions(latestTag, current) > 0;
+      const notes = (data.body || '').split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('*')).slice(0, 4).map(l => l.replace(/^[\s\-*]*/, '').trim()).filter(Boolean);
+      const asset = (data.assets || []).find(a => /Setup\.exe$/i.test(a.name)) || data.assets[0];
+      return {
+        configured: true,
+        preview: true,
+        currentVersion: current,
+        updateAvailable: hasUpdate,
+        latestVersion: latestTag,
+        release: {
+          version: latestTag,
+          htmlUrl: data.html_url || '',
+          downloadUrl: asset ? asset.browser_download_url : '',
+          summary: hasUpdate ? `发现新版本 v${latestTag}` : '已是最新版本',
+          notes: notes.length ? notes : ['性能优化', 'Bug 修复'],
+          asset: asset ? { name: asset.name, size: asset.size, sha512: '' } : null,
+        },
+      };
+    } catch (e) {
+      return { configured: true, preview: true, currentVersion: pkg.version, error: e.message };
+    }
   },
 
   // ---- cookie get/set ----

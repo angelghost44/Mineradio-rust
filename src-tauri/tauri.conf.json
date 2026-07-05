@@ -2,12 +2,12 @@
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "Mineradio",
   "version": "1.1.0",
-  "identifier": "com.mineradio.app",
+  "identifier": "com.mineradio.desktop",
   "build": {
     "frontendDist": "../public",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "",
-    "beforeBuildCommand": ""
+    "beforeBuildCommand": "npm install --prefix ../sidecar"
   },
   "app": {
     "windows": [
@@ -31,13 +31,31 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "nsis",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": [],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "pubkey": "",
+      "endpoints": [
+        "https://api.github.com/repos/XxHuberrr/Mineradio/releases/latest"
+      ],
+      "dialog": false,
+      "installMode": "passive"
+    }
   }
 }
