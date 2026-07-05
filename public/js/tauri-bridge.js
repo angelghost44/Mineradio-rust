@@ -12,6 +12,8 @@ window.MR = window.MR || {};
     return;
   }
 
+  // ---- Core IPC ----
+
   MR.invoke = function (cmd, args) {
     return tauri.core.invoke(cmd, args);
   };
@@ -31,6 +33,95 @@ window.MR = window.MR || {};
     },
     save: function (data) {
       return tauri.core.invoke('save_state', { data: data });
+    }
+  };
+
+  // ---- Desktop window API (Tauri v2) ----
+
+  var win = tauri.window && tauri.window.getCurrentWindow();
+  if (!win) {
+    console.warn('[MR] tauri.window not available');
+    window.desktopWindow = { isDesktop: false };
+    return;
+  }
+
+  window.desktopWindow = {
+    isDesktop: true,
+
+    minimize: function () {
+      return win.minimize();
     },
+
+    maximize: function () {
+      return win.toggleMaximize();
+    },
+
+    close: function () {
+      return win.close();
+    },
+
+    toggleFullscreen: function () {
+      return win.isFullscreen().then(function (fs) {
+        return win.setFullscreen(!fs);
+      });
+    },
+
+    exitFullscreenWindowed: function () {
+      return win.setFullscreen(false);
+    },
+
+    isMaximized: function () {
+      return win.isMaximized();
+    },
+
+    getState: function () {
+      return Promise.all([
+        win.isMaximized(),
+        win.isFullscreen(),
+        win.getInnerSize(),
+        win.getOuterPosition()
+      ]).then(function (r) {
+        return {
+          maximized: r[0],
+          fullscreen: r[1],
+          focused: document.hasFocus(),
+          bounds: {
+            width: r[2].width,
+            height: r[2].height,
+            x: r[3].x,
+            y: r[3].y
+          }
+        };
+      });
+    },
+
+    onStateChange: function (cb) {
+      var ul1 = win.onResized(function () { cb(); });
+      var ul2 = win.onMoved(function () { cb(); });
+      var ul3 = win.onFocusChanged(function () { cb(); });
+      return function () { ul1(); ul2(); ul3(); };
+    },
+
+    onMaximizeChange: function (cb) {
+      return win.onResized(function () {
+        win.isMaximized().then(cb);
+      });
+    },
+
+    onFocusChange: function (cb) {
+      return win.onFocusChanged(cb);
+    },
+
+    onDesktopLyricsLockState: function (cb) {
+      return tauri.event.listen('desktop-lyrics-lock-state', function (e) {
+        cb(e.payload);
+      });
+    },
+
+    onDesktopLyricsEnabledState: function (cb) {
+      return tauri.event.listen('desktop-lyrics-enabled-state', function (e) {
+        cb(e.payload);
+      });
+    }
   };
 })();

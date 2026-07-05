@@ -276,8 +276,8 @@ function readSavedLyricLayout() {
       edge: raw.edge === true,
       visualTintMode: raw.visualTintMode === 'custom' ? 'custom' : 'auto',
       visualTintColor: normalizeHexColor(raw.visualTintColor || '#9db8cf'),
-      uiAccentColor: normalizeHexColor(raw.uiAccentColor || '#00f5d4', '#00f5d4'),
-      homeAccentColor: normalizeHexColor(raw.homeAccentColor || '#00f5d4'),
+      uiAccentColor: normalizeHexColor(raw.uiAccentColor || '#ffffff', '#ffffff'),
+      homeAccentColor: normalizeHexColor(raw.homeAccentColor || '#ffffff'),
       homeIconColor: normalizeHexColor(raw.homeIconColor || fxDefaults.homeIconColor || '#f4d28a', '#f4d28a'),
       visualIconColor: normalizeHexColor(raw.visualIconColor || fxDefaults.visualIconColor || '#7fd8ff', '#7fd8ff'),
       backgroundColorMode: savedBgCustom ? 'custom' : 'cover',
@@ -366,8 +366,8 @@ function saveLyricLayout() {
       edge: !!fx.edge,
       visualTintMode: fx.visualTintMode === 'custom' ? 'custom' : 'auto',
       visualTintColor: normalizeHexColor(fx.visualTintColor || '#9db8cf'),
-      uiAccentColor: normalizeHexColor(fx.uiAccentColor || '#00f5d4', '#00f5d4'),
-      homeAccentColor: normalizeHexColor(fx.homeAccentColor || '#00f5d4'),
+      uiAccentColor: normalizeHexColor(fx.uiAccentColor || '#ffffff', '#ffffff'),
+      homeAccentColor: normalizeHexColor(fx.homeAccentColor || '#ffffff'),
       homeIconColor: normalizeHexColor(fx.homeIconColor || '#f4d28a', '#f4d28a'),
       visualIconColor: normalizeHexColor(fx.visualIconColor || '#7fd8ff', '#7fd8ff'),
       backgroundColorMode: fx.backgroundColorMode === 'custom' || fx.backgroundColorCustom ? 'custom' : 'cover',
@@ -918,14 +918,14 @@ window.addEventListener('resize', function(){
   else repositionFxFloatingPanels();
 });
 function uiAccentHex(fallback) {
-  return normalizeHexColor((fx && fx.uiAccentColor) || fallback || '#00f5d4', fallback || '#00f5d4');
+  return normalizeHexColor((fx && fx.uiAccentColor) || fallback || '#ffffff', fallback || '#ffffff');
 }
 function uiAccentRgba(alpha, fallback) {
   var c = hexToRgb(uiAccentHex(fallback));
   return 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + (alpha == null ? 1 : alpha) + ')';
 }
 function readableInkForHex(hex) {
-  var c = hexToRgb(hex || '#00f5d4');
+  var c = hexToRgb(hex || '#ffffff');
   var lum = (c.r * 0.299 + c.g * 0.587 + c.b * 0.114) / 255;
   return lum > 0.54 ? '#06100f' : '#f8fbff';
 }

@@ -1167,31 +1167,29 @@ function queueAllLocalMusic() {
   if (!files || !files.length) return;
   for (var i = 0; i < files.length; i++) {
     var file = files[i];
-  var url = localAudioUrl(file.path);
-  var coverApi = window.location.origin + '/api/local/cover?path=' + encodeURIComponent(file.path);
-  var song = hydrateCustomCover({
-    type: 'local',
-    name: file.name,
-    artist: '本地文件',
-    cover: coverApi,
-    localKey: 'scan:' + file.path,
-    filePath: file.path,
-    localUrl: url,
-    size: file.size || 0,
-    duration: 0,
-  });
-  fetch(coverApi, { method: 'HEAD' }).catch(function(){});
-  playQueue.push(song);
-  safeRenderQueuePanel('queue-local-song');
-  safeShelfRebuild('queue-local-song');
-  showToast('已添加到队列: ' + file.name);
-}
-function queueAllLocalMusic() {
-  var files = localMusicState.files;
-  if (!files || !files.length) return;
-  for (var i = 0; i < files.length; i++) {
-    var file = files[i];
     var url = localAudioUrl(file.path);
+    var coverApi = window.location.origin + '/api/local/cover?path=' + encodeURIComponent(file.path);
+    var song = hydrateCustomCover({
+      type: 'local',
+      name: file.name,
+      artist: '本地文件',
+      cover: coverApi,
+      localKey: 'scan:' + file.path,
+      filePath: file.path,
+      localUrl: url,
+      size: file.size || 0,
+      duration: 0,
+    });
+    fetch(coverApi, { method: 'HEAD' }).catch(function(){});
+    playQueue.push(song);
+  }
+  safeRenderQueuePanel('queue-all-local');
+  safeShelfRebuild('queue-all-local');
+  showToast('已添加全部 ' + files.length + ' 首本地音乐到播放列表');
+}
+function playLocalFile(file) {
+  if (!file || !file.path) return;
+  var url = localAudioUrl(file.path);
   var coverApi = window.location.origin + '/api/local/cover?path=' + encodeURIComponent(file.path);
 
   var song = hydrateCustomCover({

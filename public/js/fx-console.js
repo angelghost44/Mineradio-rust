@@ -704,27 +704,27 @@ function updateLyricGlowControls() {
   }
 }
 function applyHomeAccentColor() {
-  var color = normalizeHexColor(fx.homeAccentColor || '#00f5d4');
+  var color = normalizeHexColor(fx.homeAccentColor || '#ffffff');
   var rgb = hexToRgb(color);
   document.documentElement.style.setProperty('--home-accent', color);
   document.documentElement.style.setProperty('--home-accent-rgb', rgb.r + ',' + rgb.g + ',' + rgb.b);
 }
 function updateHomeAccentControls() {
   applyHomeAccentColor();
-  var color = normalizeHexColor(fx.homeAccentColor || '#00f5d4');
+  var color = normalizeHexColor(fx.homeAccentColor || '#ffffff');
   var picker = document.getElementById('home-accent-picker');
   var value = document.getElementById('home-accent-value');
   if (picker) picker.value = color;
   if (value) value.textContent = color.toUpperCase();
 }
 function setHomeAccentColor(color, silent) {
-  fx.homeAccentColor = normalizeHexColor(color || '#00f5d4');
+  fx.homeAccentColor = normalizeHexColor(color || '#ffffff');
   updateHomeAccentControls();
   saveLyricLayout();
   if (!silent) showToast('Home 填充: ' + fx.homeAccentColor.toUpperCase());
 }
 function resetHomeAccentColor() {
-  setHomeAccentColor(fxDefaults.homeAccentColor || '#00f5d4');
+  setHomeAccentColor(fxDefaults.homeAccentColor || '#ffffff');
 }
 function applyIconAccentColors() {
   var homeColor = normalizeHexColor(fx.homeIconColor || fxDefaults.homeIconColor || '#f4d28a', '#f4d28a');
@@ -946,7 +946,7 @@ function readBackgroundMediaFile(file) {
   else showToast('请选择图片或视频文件');
 }
 function applyUiAccentColor() {
-  var color = normalizeHexColor(fx.uiAccentColor || '#00f5d4', '#00f5d4');
+  var color = normalizeHexColor(fx.uiAccentColor || '#ffffff', '#ffffff');
   var rgb = hexToRgb(color);
   var root = document.documentElement;
   root.style.setProperty('--fc-accent', color);
@@ -957,21 +957,21 @@ function applyUiAccentColor() {
 }
 function updateUiAccentControls() {
   applyUiAccentColor();
-  var color = normalizeHexColor(fx.uiAccentColor || '#00f5d4', '#00f5d4');
+  var color = normalizeHexColor(fx.uiAccentColor || '#ffffff', '#ffffff');
   var picker = document.getElementById('ui-accent-picker');
   var value = document.getElementById('ui-accent-value');
   if (picker) picker.value = color;
   if (value) value.textContent = color.toUpperCase();
 }
 function setUiAccentColor(color, silent) {
-  fx.uiAccentColor = normalizeHexColor(color || '#00f5d4', '#00f5d4');
+  fx.uiAccentColor = normalizeHexColor(color || '#ffffff', '#ffffff');
   updateUiAccentControls();
   if (shelfManager && shelfManager.refreshTheme) shelfManager.refreshTheme();
   saveLyricLayout();
   if (!silent) showToast('界面高亮: ' + fx.uiAccentColor.toUpperCase());
 }
 function resetUiAccentColor() {
-  setUiAccentColor(fxDefaults.uiAccentColor || '#00f5d4');
+  setUiAccentColor(fxDefaults.uiAccentColor || '#ffffff');
 }
 function updateVisualTintControls() {
   var picker = document.getElementById('visual-tint-picker');
@@ -2237,7 +2237,7 @@ function bindFxPanel() {
   var uiAccentPicker = document.getElementById('ui-accent-picker');
   if (uiAccentPicker) {
     uiAccentPicker.addEventListener('input', function(){ setUiAccentColor(uiAccentPicker.value, true); });
-    uiAccentPicker.addEventListener('change', function(){ showToast('界面高亮: ' + normalizeHexColor(uiAccentPicker.value, '#00f5d4').toUpperCase()); });
+    uiAccentPicker.addEventListener('change', function(){ showToast('界面高亮: ' + normalizeHexColor(uiAccentPicker.value, '#ffffff').toUpperCase()); });
   }
   var visualTintPicker = document.getElementById('visual-tint-picker');
   if (visualTintPicker) {

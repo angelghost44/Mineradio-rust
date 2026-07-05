@@ -122,6 +122,21 @@ var homeWeatherLoadTimer = null;
 var homeWeatherLoadPromise = null;
 var weatherRadioStartBusy = false;
 var activeRadioContext = null;
+function loadListenStatsState() {
+  try {
+    var raw = localStorage.getItem(HOME_LISTEN_STATS_KEY);
+    if (!raw) return { history: [], songs: {}, artists: {}, updatedAt: 0 };
+    var data = JSON.parse(raw);
+    return {
+      history: Array.isArray(data.history) ? data.history.slice(0, 180) : [],
+      songs: data.songs && typeof data.songs === 'object' ? data.songs : {},
+      artists: data.artists && typeof data.artists === 'object' ? data.artists : {},
+      updatedAt: Number(data.updatedAt) || 0,
+    };
+  } catch (e) {
+    return { history: [], songs: {}, artists: {}, updatedAt: 0 };
+  }
+}
 var listenStatsState = loadListenStatsState();
 var listenSession = null;
 var appPerfMarks = [];

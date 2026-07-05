@@ -5,20 +5,24 @@
   "identifier": "com.mineradio.desktop",
   "build": {
     "frontendDist": "../public",
-    "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "npm install --prefix ../sidecar"
+    "devUrl": "http://localhost:8080",
+    "beforeDevCommand": "python -m http.server 8080 --directory ../public",
+    "beforeBuildCommand": "npm install --prefix ./sidecar"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "Mineradio",
         "width": 1280,
         "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
+        "minWidth": 960,
+        "minHeight": 540,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": false
       }
     ],
     "security": {

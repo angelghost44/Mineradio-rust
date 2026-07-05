@@ -359,7 +359,7 @@ var playlistPanelPinned = readBooleanPreference(PLAYLIST_PANEL_PIN_STORE_KEY, fa
 var userCapsuleAutoHide = readBooleanPreference(USER_CAPSULE_AUTO_HIDE_STORE_KEY, false);
 var fxFabAutoHide = readBooleanPreference(FX_FAB_AUTO_HIDE_STORE_KEY, false);
 var fxFabAutoHideRevealArmed = true;
-var hotkeySettings = readHotkeySettings();
+var hotkeySettings = null; // initialized by fx-console.js on load
 var immersiveMode = false;
 var immersiveState = {
   shelfMode: null,

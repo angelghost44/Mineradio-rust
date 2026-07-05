@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::sync::Mutex;
@@ -38,13 +39,13 @@ struct SidecarInner {
 pub struct SidecarProcess {
     inner: Mutex<SidecarInner>,
     node_path: String,
-    script_path: String,
+    sidecar_dir: PathBuf,
     next_id: Mutex<u64>,
     consecutive_restarts: Mutex<u32>,
 }
 
 impl SidecarProcess {
-    pub fn new(node: &str, script: &str) -> Self {
+    pub fn new(node: &str, sidecar_dir: &PathBuf) -> Self {
         Self {
             inner: Mutex::new(SidecarInner {
                 child: None,
@@ -52,7 +53,7 @@ impl SidecarProcess {
                 stdout: None,
             }),
             node_path: node.to_string(),
-            script_path: script.to_string(),
+            sidecar_dir: sidecar_dir.clone(),
             next_id: Mutex::new(1),
             consecutive_restarts: Mutex::new(0),
         }
@@ -65,14 +66,19 @@ impl SidecarProcess {
         }
 
         let mut child = Command::new(&self.node_path)
-            .arg(&self.script_path)
+            .arg("index.js")
+            .current_dir(&self.sidecar_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| format!("failed to start sidecar: {}", e))?;
 
-        println!("[Sidecar] started (PID: {})", child.id());
+        println!(
+            "[Sidecar] started (PID: {}) at {}",
+            child.id(),
+            self.sidecar_dir.display()
+        );
 
         inner.stdin = child.stdin.take();
         inner.stdout = child.stdout.take();

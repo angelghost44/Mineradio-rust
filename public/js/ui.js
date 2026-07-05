@@ -568,7 +568,7 @@ function updateUserModalUi() {
     } else {
       var qqVipLabel = hasProviderVip('qq', st) ? 'QQ VIP 会员' : 'QQ 音乐会话';
       vipEl.textContent = 'UID: ' + ((st && st.userId) || '-') + '  ·  ' + qqVipLabel;
-      vipEl.style.color = hasProviderVip('qq', st) ? 'rgba(0,245,212,0.82)' : 'rgba(0,245,212,0.58)';
+      vipEl.style.color = hasProviderVip('qq', st) ? 'rgba(var(--fc-accent-rgb),0.82)' : 'rgba(var(--fc-accent-rgb),0.58)';
     }
   }
   ['netease','qq','both'].forEach(function(key){
