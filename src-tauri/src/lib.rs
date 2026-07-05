@@ -4,9 +4,11 @@ use tauri::Manager;
 
 mod commands;
 mod extractor;
+mod lyrics;
 mod scanner;
 mod sidecar_manager;
 pub mod state;
+mod wallpaper;
 
 pub struct SidecarState(pub Mutex<sidecar_manager::SidecarProcess>);
 
@@ -159,6 +161,12 @@ pub fn run() {
             commands::sidecar_call,
             crate::state::load_state,
             crate::state::save_state,
+            crate::lyrics::toggle_desktop_lyrics,
+            crate::lyrics::update_desktop_lyrics,
+            crate::lyrics::move_lyrics_by,
+            crate::lyrics::set_lyrics_lock_state,
+            crate::wallpaper::toggle_wallpaper_mode,
+            crate::wallpaper::update_wallpaper_mode,
         ])
         .setup(|app| {
             let sidecar_dir = resolve_sidecar_dir();
@@ -171,6 +179,8 @@ pub fn run() {
                     eprintln!("[Sidecar] failed to start: {}", e);
                 }
             }
+
+            crate::lyrics::setup_listeners(app.handle());
 
             // Dynamic window sizing matching Electron's getWindowedBounds
             if let Some(window) = app.get_webview_window("main") {

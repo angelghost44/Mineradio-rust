@@ -124,6 +124,26 @@ window.MR = window.MR || {};
       return tauri.event.listen('desktop-lyrics-enabled-state', function (e) {
         cb(e.payload);
       });
+    },
+
+    // ---- Desktop lyrics management ----
+
+    setDesktopLyricsEnabled: function (enabled, payload) {
+      return tauri.core.invoke('toggle_desktop_lyrics', { enabled: enabled, payload: payload || {} });
+    },
+
+    updateDesktopLyrics: function (payload) {
+      return tauri.core.invoke('update_desktop_lyrics', { payload: payload || {} });
+    },
+
+    // ---- Wallpaper mode management ----
+
+    setWallpaperMode: function (enabled, payload) {
+      return tauri.core.invoke('toggle_wallpaper_mode', { enabled: enabled, payload: payload || {} });
+    },
+
+    updateWallpaperMode: function (payload) {
+      return tauri.core.invoke('update_wallpaper_mode', { payload: payload || {} });
     }
   };
 })();
