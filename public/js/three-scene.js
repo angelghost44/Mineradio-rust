@@ -1553,7 +1553,7 @@ function isBottomControlsSuppressedForShelf() {
   try {
     shelfContentOpen = !!(typeof shelfManager !== 'undefined' && shelfManager && shelfManager.hasOpenContent && shelfManager.hasOpenContent());
   } catch (e) {}
-  return !!(shelfPinnedOpen || shelfContentOpen || (controlsShelfSuppressUntil && performance.now() < controlsShelfSuppressUntil));
+  return !!((typeof shelfPinnedOpen !== 'undefined' && shelfPinnedOpen) || shelfContentOpen || (controlsShelfSuppressUntil && performance.now() < controlsShelfSuppressUntil));
 }
 
 function suppressBottomControlsForShelf(duration) {

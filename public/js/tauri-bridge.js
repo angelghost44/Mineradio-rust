@@ -75,11 +75,13 @@ window.MR = window.MR || {};
     },
 
     getState: function () {
+      var sizeP = (typeof win.innerSize === 'function' ? win.innerSize() : win.size());
+      var posP = (typeof win.outerPosition === 'function' ? win.outerPosition() : win.position());
       return Promise.all([
         win.isMaximized(),
         win.isFullscreen(),
-        win.getInnerSize(),
-        win.getOuterPosition()
+        sizeP,
+        posP
       ]).then(function (r) {
         return {
           maximized: r[0],
