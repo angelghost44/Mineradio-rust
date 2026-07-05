@@ -1,0 +1,55 @@
+.lyric-color-row.bg-cover-mode #bg-color-picker{
+  border-color:rgba(255,255,255,.26)!important;
+  background:conic-gradient(from 210deg,#f8f4ee,#9db8cf,#2442ff,#f4d28a,#f8f4ee)!important;
+  box-shadow:0 0 0 1px rgba(var(--fc-accent-rgb),.12),0 10px 24px rgba(0,0,0,.22)!important;
+}
+.lyric-color-row.bg-cover-mode #bg-color-picker::-webkit-color-swatch{opacity:.18}
+.lyric-color-row.bg-cover-mode .fx-color-row-label small{color:rgba(var(--fc-accent-rgb),.78)}
+.cover-color-pop,.color-lab-pop{
+  transform:none!important;
+  max-height:calc(100vh - 28px);
+  overflow:auto;
+}
+@media (max-width:720px){
+  .fx-panel-tabs{display:flex;overflow-x:auto;scrollbar-width:none;top:-14px}
+  .fx-panel-tabs::-webkit-scrollbar{display:none}
+  .fx-panel-tabs button{flex:0 0 auto;min-width:58px;padding:0 10px}
+  .cover-color-pop,.color-lab-pop{width:calc(100vw - 28px)!important}
+}
+
+/* ============================================================ */
+/*  舞台歌词 (大字 + 3D 入场 + 呼吸)                              */
+/* ============================================================ */
+#stage-lyrics{display:none}
+.stage-lyric-line{position:absolute;font-family:var(--font-sans);font-weight:700;font-size:clamp(34px,5.6vw,76px);letter-spacing:2px;text-align:center;color:#fff;white-space:nowrap;max-width:92vw;padding:0 24px;text-shadow:0 0 14px rgba(168,246,255,.38),0 0 36px rgba(143,233,255,.30),0 0 80px rgba(115,167,255,.16);background:linear-gradient(180deg,rgba(246,253,255,1) 0%,rgba(168,246,255,1) 55%,rgba(126,205,255,1) 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;opacity:0;transform-style:preserve-3d;will-change:transform,opacity,filter;filter:drop-shadow(0 4px 22px rgba(143,233,255,.30))}
+.stage-lyric-line.in{animation:lyr-in 900ms cubic-bezier(.16,.84,.32,1.02) forwards,lyr-bob 5.6s ease-in-out 900ms infinite}
+.stage-lyric-line.out{animation:lyr-out 700ms cubic-bezier(.55,0,.85,.45) forwards}
+@keyframes lyr-bob{0%,100%{transform:translate3d(var(--bx,0px),0,0) rotateX(0deg) rotateY(0deg) scale(1)}25%{transform:translate3d(calc(var(--bx,0px) + 6px),-7px,12px) rotateX(2deg) rotateY(-1.5deg) scale(1.01)}50%{transform:translate3d(var(--bx,0px),3px,0) rotateX(-1.5deg) rotateY(0deg) scale(.99)}75%{transform:translate3d(calc(var(--bx,0px) - 6px),-4px,8px) rotateX(1.2deg) rotateY(1.5deg) scale(1.005)}}
+@keyframes lyr-in{0%{opacity:0;transform:translate3d(var(--inx,-60px),var(--iny,40px),-160px) rotateX(var(--inrx,28deg)) rotateY(var(--inry,-22deg)) scale(.7);filter:blur(14px) drop-shadow(0 4px 22px rgba(143,233,255,.30))}55%{opacity:1;filter:blur(0) drop-shadow(0 4px 22px rgba(143,233,255,.30))}100%{opacity:1;transform:translate3d(var(--bx,0px),0,0) rotateX(0deg) rotateY(0deg) scale(1);filter:blur(0) drop-shadow(0 4px 22px rgba(143,233,255,.30))}}
+@keyframes lyr-out{0%{opacity:1;transform:translate3d(var(--bx,0px),0,0) rotateX(0) rotateY(0) scale(1);filter:blur(0)}100%{opacity:0;transform:translate3d(var(--outx,60px),var(--outy,-40px),-120px) rotateX(var(--outrx,-22deg)) rotateY(var(--outry,18deg)) scale(.78);filter:blur(10px)}}
+
+/* ============================================================ */
+/*  手势 HUD + 手骨架                                            */
+/* ============================================================ */
+.gesture-hud{position:fixed;left:50%;bottom:110px;z-index:21;width:min(440px,calc(100vw - 44px));padding:12px 16px;border-radius:16px;background:rgba(10,10,16,.42);border:1px solid rgba(255,255,255,.10);backdrop-filter:blur(28px) saturate(1.4);-webkit-backdrop-filter:blur(28px) saturate(1.4);font-size:12px;color:rgba(255,255,255,.80);opacity:0;transform:translate(-50%,8px);transition:all .2s;pointer-events:none;box-shadow:0 18px 60px rgba(0,0,0,.4)}
+.gesture-hud.show{opacity:1;transform:translate(-50%,0)}
+.gesture-hud b{color:var(--champagne);font-weight:600}
+.gesture-confirm{font-size:10.5px;color:rgba(255,255,255,.52);margin-top:5px}
+.gesture-meter{height:3px;background:rgba(255,255,255,.10);border-radius:4px;overflow:hidden;margin-top:8px}
+.gesture-meter span{display:block;height:100%;width:0%;background:var(--champagne);border-radius:4px;transition:width .08s linear}
+.gesture-legend{font-size:10px;color:rgba(255,255,255,.4);margin-top:6px;line-height:1.5}
+#hand-canvas{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:22;opacity:0;transition:opacity .35s}
+#hand-canvas.show{opacity:1}
+
+/* ============================================================ */
+/*  响应式                                                        */
+/* ============================================================ */
+@media (max-width:720px){
+  #fx-panel,#playlist-panel{right:12px;left:12px;width:auto;top:76px;bottom:auto}
+  #top-right{right:12px}
+}
+@media (max-width:520px){
+  .preset-grid,.fx-toggle-grid{grid-template-columns:1fr}
+  .fx-slider{grid-template-columns:74px minmax(0,1fr) 40px 28px;gap:8px;padding:8px}
+  .lyric-color-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}

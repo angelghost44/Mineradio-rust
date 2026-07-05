@@ -1,0 +1,25 @@
+# Rust / Cargo build artifacts
+src-tauri/target/
+
+# Local linker config (environment-specific)
+src-tauri/.cargo/
+
+# Node
+node_modules/
+package-lock.json
+
+# Tauri installer output
+src-tauri/target/release/bundle/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
