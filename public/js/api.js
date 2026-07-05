@@ -1,6 +1,9 @@
 //  API 助手
 // ============================================================
 async function apiJson(url, opts) {
+  if (typeof MR !== 'undefined' && MR.invoke && !opts._noTauri) {
+    return apiJsonTauri(url, opts);
+  }
   opts = opts || {};
   var timeoutMs = Number(opts.timeoutMs) || 0;
   var fetchOpts = Object.assign({}, opts);
@@ -17,6 +20,70 @@ async function apiJson(url, opts) {
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+async function apiJsonTauri(url, opts) {
+  try {
+    var u = new URL(url, window.location.origin);
+    var pn = u.pathname;
+    if (pn === '/api/local/scan') {
+      return await MR.invoke('scan_folder', { folder: u.searchParams.get('folder') || '' });
+    }
+    if (pn === '/api/local/cover') {
+      var coverPath = u.searchParams.get('path') || '';
+      var result = await MR.invoke('extract_cover', { path: coverPath });
+      if (result && result.data) {
+        return { data: 'data:' + result.mime + ';base64,' + result.data };
+      }
+      return { data: null };
+    }
+    if (pn === '/api/update/latest' && MR.sidecar) {
+      return await MR.sidecar.call('check_update');
+    }
+    if (MR.sidecar) {
+      var method = tauriRouteToMethod(pn);
+      if (method) {
+        var params = {};
+        u.searchParams.forEach(function(v,k){ params[k] = v; });
+        if (opts && opts.method === 'POST' && opts.body) {
+          try { Object.assign(params, JSON.parse(opts.body)); } catch(e) {}
+        }
+        return await MR.sidecar.call(method, params);
+      }
+    }
+    var res = await fetch(url, opts);
+    return res.json();
+  } catch(e) { throw e; }
+}
+
+function tauriRouteToMethod(pn) {
+  var map = {
+    '/api/search':'search','/api/song/url':'song_url','/api/song/url/v1':'song_url_v1',
+    '/api/lyric':'lyric','/api/lyric/new':'lyric_new',
+    '/api/login/qr/key':'login_qr_key','/api/login/qr/create':'login_qr_create',
+    '/api/login/qr/check':'login_qr_check','/api/login/status':'login_status',
+    '/api/login/cookie':'get_cookie','/api/logout':'logout',
+    '/api/user/playlists':'user_playlists','/api/playlist/tracks':'playlist_tracks',
+    '/api/playlist/track/all':'playlist_track_all','/api/playlist/detail':'playlist_detail',
+    '/api/playlist/add-song':'playlist_add_song','/api/playlist/create':'playlist_create',
+    '/api/song/like':'like_song','/api/song/like/check':'likelist',
+    '/api/discover/home':'personalized',
+    '/api/artist/detail':'artist_detail','/api/artist/top/song':'artist_top_song','/api/artist/songs':'artist_songs',
+    '/api/comment/music':'comment_music',
+    '/api/podcast/hot':'dj_hot','/api/podcast/programs':'dj_program','/api/podcast/detail':'dj_detail',
+    '/api/podcast/my':'dj_sublist','/api/podcast/my/items':'user_audio','/api/podcast/voice/recent':'record_recent_voice',
+    '/api/qq/search':'qq_search','/api/qq/song/url':'qq_song_url','/api/qq/lyric':'qq_lyric',
+    '/api/qq/user/playlists':'qq_user_playlists','/api/qq/playlist/tracks':'qq_playlist_tracks',
+    '/api/qq/login/cookie':'qq_login_cookie','/api/qq/login/status':'qq_login_status','/api/qq/logout':'qq_logout',
+  };
+  return map[pn] || null;
+}
+
+function localAudioUrl(filePath) {
+  if (typeof MR !== 'undefined' && MR.convertFileSrc) {
+    return MR.convertFileSrc(filePath);
+  }
+  return '/api/local/audio?path=' + encodeURIComponent(filePath);
 }
 function escHtml(s){ var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function normalizePlaybackQuality(value) {
@@ -1075,7 +1142,7 @@ function queueLocalMusicIndex(idx) {
   var files = localMusicState.files;
   if (!files || idx < 0 || idx >= files.length) return;
   var file = files[idx];
-  var url = '/api/local/audio?path=' + encodeURIComponent(file.path);
+  var url = localAudioUrl(file.path);
   var coverApi = window.location.origin + '/api/local/cover?path=' + encodeURIComponent(file.path);
   var song = hydrateCustomCover({
     type: 'local',
@@ -1100,29 +1167,31 @@ function queueAllLocalMusic() {
   if (!files || !files.length) return;
   for (var i = 0; i < files.length; i++) {
     var file = files[i];
-    var url = '/api/local/audio?path=' + encodeURIComponent(file.path);
-    var coverApi = window.location.origin + '/api/local/cover?path=' + encodeURIComponent(file.path);
-    var song = hydrateCustomCover({
-      type: 'local',
-      name: file.name,
-      artist: '本地文件',
-      cover: coverApi,
-      localKey: 'scan:' + file.path,
-      filePath: file.path,
-      localUrl: url,
-      size: file.size || 0,
-      duration: 0,
-    });
-    fetch(coverApi, { method: 'HEAD' }).catch(function(){});
-    playQueue.push(song);
-  }
-  safeRenderQueuePanel('queue-all-local');
-  safeShelfRebuild('queue-all-local');
-  showToast('已添加全部 ' + files.length + ' 首本地音乐到播放列表');
+  var url = localAudioUrl(file.path);
+  var coverApi = window.location.origin + '/api/local/cover?path=' + encodeURIComponent(file.path);
+  var song = hydrateCustomCover({
+    type: 'local',
+    name: file.name,
+    artist: '本地文件',
+    cover: coverApi,
+    localKey: 'scan:' + file.path,
+    filePath: file.path,
+    localUrl: url,
+    size: file.size || 0,
+    duration: 0,
+  });
+  fetch(coverApi, { method: 'HEAD' }).catch(function(){});
+  playQueue.push(song);
+  safeRenderQueuePanel('queue-local-song');
+  safeShelfRebuild('queue-local-song');
+  showToast('已添加到队列: ' + file.name);
 }
-function playLocalFile(file) {
-  if (!file || !file.path) return;
-  var url = '/api/local/audio?path=' + encodeURIComponent(file.path);
+function queueAllLocalMusic() {
+  var files = localMusicState.files;
+  if (!files || !files.length) return;
+  for (var i = 0; i < files.length; i++) {
+    var file = files[i];
+    var url = localAudioUrl(file.path);
   var coverApi = window.location.origin + '/api/local/cover?path=' + encodeURIComponent(file.path);
 
   var song = hydrateCustomCover({
