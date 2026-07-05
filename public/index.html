@@ -22,7 +22,8 @@ try {
 <link rel="stylesheet" href="css/panels-fx.css">
 <link rel="stylesheet" href="css/stage-lyrics.css">
 </head>
-<body><div id="desktop-window-shell">
+<body><div id="custom-bg"><video id="custom-bg-video" muted loop playsinline preload="metadata"></video></div>
+<div id="desktop-window-shell">
 <div id="desktop-titlebar" aria-label="window controls" data-tauri-drag-region>
   <div class="desktop-drag-region">
     <div class="desktop-app-mark" aria-hidden="true"></div>
@@ -54,9 +55,6 @@ try {
 <div id="fullscreen-diy-zone" aria-hidden="true">
   <button id="fullscreen-diy-btn" class="desktop-mode-btn" type="button" onclick="toggleDiyMode()" title="DIY" aria-label="DIY" aria-pressed="false">DIY</button>
 </div>
-<div id="custom-bg"><video id="custom-bg-video" muted loop playsinline preload="metadata"></video></div>
-<div id="album-bg"></div>
-<div id="canvas-container"></div>
 <canvas id="idle-guide-canvas" aria-hidden="true"></canvas>
 
 <!-- 启动页 -->
