@@ -1,7 +1,7 @@
 //  API 助手
 // ============================================================
 async function apiJson(url, opts) {
-  if (typeof MR !== 'undefined' && MR.invoke && !opts._noTauri) {
+  if (typeof MR !== 'undefined' && MR.invoke && opts && !opts._noTauri) {
     return apiJsonTauri(url, opts);
   }
   opts = opts || {};
