@@ -2019,7 +2019,7 @@ function renderHotkeyScope(scope) {
   Object.keys(groups).forEach(function(category){
     html += '<div class="hotkey-group"><div class="hotkey-group-title">' + escHtml(category) + '</div>';
     groups[category].forEach(function(action){
-      var binding = (hotkeySettings[scope] && hotkeySettings[scope][action.key]) || '';
+      var binding = (hotkeySettings && hotkeySettings[scope] && hotkeySettings[scope][action.key]) || '';
       html += '<div class="hotkey-row">' +
         '<div class="hotkey-name">' + escHtml(action.label) + '</div>' +
         '<button class="hotkey-key' + (hotkeyCaptureState && hotkeyCaptureState.scope === scope && hotkeyCaptureState.action === action.key ? ' capturing' : '') + '" type="button" data-hotkey-bind="' + scope + '" data-hotkey-action="' + action.key + '">' + escHtml(hotkeyCaptureState && hotkeyCaptureState.scope === scope && hotkeyCaptureState.action === action.key ? '按下组合键...' : formatHotkey(binding)) + '</button>' +
