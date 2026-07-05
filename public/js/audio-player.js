@@ -2234,7 +2234,6 @@ function bindModalBackdropClose() {
     });
   });
 }
-bindModalBackdropClose();
 function renderQueuePanel(opts) {
   opts = opts || {};
   var $ql = document.getElementById('queue-list');

@@ -1729,3 +1729,6 @@ function animate() {
   renderer.render(scene, camera);
 }
 animate();
+
+// ── Deferred initialization (forward-safe) ──
+if (typeof bindModalBackdropClose === 'function') bindModalBackdropClose();
