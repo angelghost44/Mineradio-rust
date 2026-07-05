@@ -965,6 +965,7 @@ function markSplashReadyToEnter() {
 }
 
 document.addEventListener('DOMContentLoaded', function(){
+  loadStateFromRust(); // Phase 3: restore persisted state
   var s = document.getElementById('splash');
   if (!s) return;
   markAppPerf('dom-content-loaded');

@@ -77,6 +77,8 @@ var localBeatMapCache = readLocalBeatMapCache();
 var localBeatMapPrefs = readLocalBeatPrefs();
 var playbackQuality = readPlaybackQualityPreference();
 var qqPlaybackQualityCeiling = '';
+var controlsAutoHide = readBooleanPreference(CONTROLS_AUTO_HIDE_STORE_KEY, false);
+var playlistPanelPinned = readBooleanPreference(PLAYLIST_PANEL_PIN_STORE_KEY, false);
 var coverCropState = null, coverCropBound = false;
 var currentLocalSong = null;
 var lyricSourceMode = 'original';
@@ -307,6 +309,20 @@ function layoutFullscreenDiyZone() {
   document.documentElement.style.setProperty('--fullscreen-diy-width', width + 'px');
   return { left: left, top: top, width: width, height: height };
 }
+
+function applyControlsAutoHideState() {
+  document.body.classList.toggle('controls-auto-hide', !!controlsAutoHide);
+}
+
+function applyPlaylistPanelPinnedState() {
+  document.body.classList.toggle('playlist-panel-pinned', !!playlistPanelPinned);
+  var btn = document.getElementById('playlist-panel-pin-btn');
+  if (btn) {
+    btn.classList.toggle('on', !!playlistPanelPinned);
+    btn.title = playlistPanelPinned ? '取消固定歌单面板' : '固定歌单面板';
+  }
+}
+
 function shouldSuppressFullscreenDiyPeek() {
   var fxPanel = document.getElementById('fx-panel');
   var hotkeyModal = document.getElementById('hotkey-modal');
@@ -379,4 +395,115 @@ function toggleDiyMode() {
 var targetVolume = readSavedVolume();
 var lastNonZeroVolume = targetVolume > 0.01 ? targetVolume : 0.8;
 var volumeCloseTimer = null;
+
+// Phase 3: Rust state bridge — init on load, debounce save
+var _stateSaveTimer = null;
+var _stateLastSave = 0;
+var STATE_SAVE_DEBOUNCE = 2000; // ms
+
+function _doStateSave(data) {
+  if (typeof MR === 'undefined' || !MR.state || !MR.state.save) return;
+  MR.state.save(data).then(function(){ _stateLastSave = Date.now(); }).catch(function(e){
+    console.warn('[State] save failed:', e);
+  });
+}
+
+function scheduleStateSave() {
+  if (_stateSaveTimer) clearTimeout(_stateSaveTimer);
+  var data = {
+    version: 1,
+    local_music_folder: readLocalMusicFolder() || null,
+    preferences: {
+      playback_quality: playbackQuality || null,
+      diy_mode: !!diyPlayerMode,
+      user_capsule_auto_hide: !!userCapsuleAutoHide,
+      fx_fab_auto_hide: !!fxFabAutoHide,
+      controls_auto_hide: !!controlsAutoHide,
+      playlist_panel_pinned: !!playlistPanelPinned,
+      free_camera: (function(){
+        try { return JSON.parse(localStorage.getItem(FREE_CAMERA_STORE_KEY) || 'null'); } catch(e){ return null; }
+      })(),
+      lyric_layout: (function(){
+        try { return JSON.parse(localStorage.getItem(LYRIC_LAYOUT_STORE_KEY) || 'null'); } catch(e){ return null; }
+      })(),
+      hotkey_settings: (function(){
+        try { return JSON.parse(localStorage.getItem(HOTKEY_SETTINGS_STORE_KEY) || 'null'); } catch(e){ return null; }
+      })(),
+    },
+  };
+  _stateSaveTimer = setTimeout(_doStateSave, STATE_SAVE_DEBOUNCE, data);
+}
+
+function loadStateFromRust() {
+  if (typeof MR === 'undefined' || !MR.state || !MR.state.load) return Promise.resolve();
+  return MR.state.load().then(function(data){
+    if (!data || !data.preferences) return;
+    var p = data.preferences;
+    // Restore prefs into localStorage
+    if (p.playback_quality) {
+      try { localStorage.setItem(PLAYBACK_QUALITY_STORE_KEY, p.playback_quality); } catch(e){}
+    }
+    if (p.diy_mode !== undefined) {
+      try { localStorage.setItem(DIY_MODE_STORE_KEY, p.diy_mode ? '1' : '0'); } catch(e){}
+    }
+    if (p.user_capsule_auto_hide !== undefined) {
+      try { localStorage.setItem(USER_CAPSULE_AUTO_HIDE_STORE_KEY, p.user_capsule_auto_hide ? '1' : '0'); } catch(e){}
+    }
+    if (p.fx_fab_auto_hide !== undefined) {
+      try { localStorage.setItem(FX_FAB_AUTO_HIDE_STORE_KEY, p.fx_fab_auto_hide ? '1' : '0'); } catch(e){}
+    }
+    if (p.controls_auto_hide !== undefined) {
+      try { localStorage.setItem(CONTROLS_AUTO_HIDE_STORE_KEY, p.controls_auto_hide ? '1' : '0'); } catch(e){}
+    }
+    if (p.playlist_panel_pinned !== undefined) {
+      try { localStorage.setItem(PLAYLIST_PANEL_PIN_STORE_KEY, p.playlist_panel_pinned ? '1' : '0'); } catch(e){}
+    }
+    if (p.free_camera) {
+      try { localStorage.setItem(FREE_CAMERA_STORE_KEY, JSON.stringify(p.free_camera)); } catch(e){}
+    }
+    if (p.lyric_layout) {
+      try { localStorage.setItem(LYRIC_LAYOUT_STORE_KEY, JSON.stringify(p.lyric_layout)); } catch(e){}
+    }
+    if (p.hotkey_settings) {
+      try { localStorage.setItem(HOTKEY_SETTINGS_STORE_KEY, JSON.stringify(p.hotkey_settings)); } catch(e){}
+    }
+    // Reload runtime vars from localStorage
+    diyPlayerMode = readDiyModePreference();
+    playbackQuality = readPlaybackQualityPreference();
+    userCapsuleAutoHide = readBooleanPreference(USER_CAPSULE_AUTO_HIDE_STORE_KEY, false);
+    fxFabAutoHide = readBooleanPreference(FX_FAB_AUTO_HIDE_STORE_KEY, false);
+    controlsAutoHide = readBooleanPreference(CONTROLS_AUTO_HIDE_STORE_KEY, false);
+    playlistPanelPinned = readBooleanPreference(PLAYLIST_PANEL_PIN_STORE_KEY, false);
+    // Apply
+    applyDiyMode(diyPlayerMode, {});
+    applyUserCapsuleAutoHideState();
+    applyFxFabAutoHideState();
+    applyControlsAutoHideState();
+    applyPlaylistPanelPinnedState();
+  }).catch(function(e){
+    console.warn('[State] load failed:', e);
+  });
+}
+
+// Hook into existing save functions
+var _origSaveDiy = saveDiyModePreference;
+saveDiyModePreference = function(on){
+  _origSaveDiy(on);
+  scheduleStateSave();
+};
+var _origSaveBool = saveBooleanPreference;
+saveBooleanPreference = function(key, on){
+  _origSaveBool(key, on);
+  scheduleStateSave();
+};
+var _origSaveFolder = saveLocalMusicFolder;
+saveLocalMusicFolder = function(folder){
+  _origSaveFolder(folder);
+  scheduleStateSave();
+};
+var _origSaveCache = saveLocalMusicCache;
+saveLocalMusicCache = function(files){
+  _origSaveCache(files);
+  scheduleStateSave();
+};
 

@@ -1021,3 +1021,17 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 .fx-tab-page>.fx-section-label:first-child{margin-top:0}
 #fx-panel .fx-fold{margin-top:10px}
 #fx-panel .fx-fold.open{background:rgba(255,255,255,.026)}
+
+/* Settings modal */
+.settings-modal{max-width:460px}
+.settings-section{margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,.06)}
+.settings-item{display:flex;align-items:center;justify-content:space-between;padding:8px 0}
+.settings-label{font:500 13px/1 var(--font-sans);color:rgba(255,255,255,.8)}
+.settings-select{background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#fff;padding:4px 10px;font:500 12px/1.4 var(--font-sans);cursor:pointer;outline:none}
+.settings-select:hover{border-color:rgba(var(--fc-accent-rgb),.4)}
+.settings-toggle{width:40px;height:22px;border-radius:11px;border:0;background:rgba(255,255,255,.12);cursor:pointer;position:relative;transition:background .2s}
+.settings-toggle.on{background:rgba(var(--fc-accent-rgb),.6)}
+.settings-toggle::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s cubic-bezier(.34,1.56,.64,1)}
+.settings-toggle.on::after{transform:translateX(18px)}
+.settings-folder-row{display:flex;align-items:center;gap:8px;flex:1;margin-left:12px}
+.settings-input{flex:1;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:rgba(255,255,255,.6);padding:5px 10px;font:400 12px/1.4 var(--font-mono);outline:none}
