@@ -7,7 +7,7 @@
     "frontendDist": "../public",
     "devUrl": "http://localhost:8080",
     "beforeDevCommand": "python -m http.server 8080 --directory ../public",
-    "beforeBuildCommand": "npm install --prefix ./sidecar"
+    "beforeBuildCommand": ""
   },
   "app": {
     "withGlobalTauri": true,
@@ -54,7 +54,7 @@
   "plugins": {
     "updater": {
       "active": true,
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFERDIyRDVEQTQyMjIyRTEKUldUaElpS2tYUzNTSFJxb1h2cUJYczJhNmg1c2dZUXA5QWtEdjZMRjhEa1IxTFlqNWRSeEJEb2oK",
       "endpoints": [
         "https://api.github.com/repos/XxHuberrr/Mineradio/releases/latest"
       ],

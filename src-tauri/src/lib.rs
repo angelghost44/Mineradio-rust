@@ -4,13 +4,14 @@ use tauri::Manager;
 
 mod commands;
 mod extractor;
+mod login;
 mod lyrics;
+mod online_api;
 mod scanner;
-mod sidecar_manager;
 pub mod state;
 mod wallpaper;
 
-pub struct SidecarState(pub Mutex<sidecar_manager::SidecarProcess>);
+pub struct OnlineApiState(pub online_api::OnlineApiState);
 
 // ── Windows work area (excludes taskbar) via raw FFI ──────────────
 
@@ -134,20 +135,19 @@ fn get_windowed_bounds(area_w: i32, area_h: i32, area_x: i32, area_y: i32) -> (i
     (x, y, w, h)
 }
 
-fn resolve_sidecar_dir() -> PathBuf {
+fn resolve_cookie_dir() -> PathBuf {
+    // In dev, use the project root's sidecar directory (for backward compat)
     let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sidecar/");
-    if dev.join("index.js").exists() {
+    if dev.exists() {
         return std::fs::canonicalize(&dev).unwrap_or(dev);
     }
+    // In production, use the exe directory
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let p = dir.join("resources/sidecar/");
-            if p.join("index.js").exists() {
-                return p;
-            }
+            return dir.to_path_buf();
         }
     }
-    PathBuf::from("sidecar/")
+    PathBuf::from(".")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -166,22 +166,23 @@ pub fn run() {
             crate::lyrics::update_desktop_lyrics,
             crate::lyrics::move_lyrics_by,
             crate::lyrics::set_lyrics_lock_state,
+            crate::lyrics::set_lyrics_drag,
+            crate::lyrics::set_lyrics_hot_bounds,
             crate::wallpaper::toggle_wallpaper_mode,
             crate::wallpaper::update_wallpaper_mode,
+            crate::login::open_netease_music_login,
+            crate::login::open_qq_music_login,
+            crate::login::clear_netease_music_login,
+            crate::login::clear_qq_music_login,
             commands::pick_folder,
         ])
         .setup(|app| {
-            let sidecar_dir = resolve_sidecar_dir();
-            let process = sidecar_manager::SidecarProcess::new("node", &sidecar_dir);
-            app.manage(SidecarState(Mutex::new(process)));
+            let cookie_dir = resolve_cookie_dir();
+            app.manage(OnlineApiState(online_api::OnlineApiState::new(cookie_dir)));
 
-            let state = app.state::<SidecarState>();
-            if let Ok(manager) = state.0.lock() {
-                if let Err(e) = manager.start() {
-                    eprintln!("[Sidecar] failed to start: {}", e);
-                }
-            }
-
+            app.manage(crate::lyrics::LyricsState::default());
+            app.manage(crate::login::LoginWindowState::default());
+            app.manage(crate::login::LoginPending(Mutex::new(None)));
             crate::lyrics::setup_listeners(app.handle());
 
             // Dynamic window sizing matching Electron's getWindowedBounds
@@ -203,10 +204,5 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        if let tauri::RunEvent::Exit = event {
-            let state = app_handle.state::<SidecarState>();
-            let _ = state.0.lock().map(|m| m.stop());
-        }
-    });
+    app.run(|_app_handle, _event| {});
 }

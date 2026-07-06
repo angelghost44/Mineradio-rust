@@ -153,6 +153,16 @@ window.MR = window.MR || {};
         }
         return { ok: false, folder: null, canceled: true };
       });
+    },
+
+    // ---- Login cleanup ----
+
+    clearNeteaseMusicLogin: function () {
+      return tauri.core.invoke('clear_netease_music_login');
+    },
+
+    clearQQMusicLogin: function () {
+      return tauri.core.invoke('clear_qq_music_login');
     }
   };
 })();

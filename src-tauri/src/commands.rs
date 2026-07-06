@@ -14,13 +14,12 @@ pub fn extract_cover(path: String) -> Result<Option<CoverData>, String> {
 }
 
 #[tauri::command]
-pub fn sidecar_call(
-    state: tauri::State<'_, crate::SidecarState>,
+pub async fn sidecar_call(
+    state: tauri::State<'_, crate::OnlineApiState>,
     method: String,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let manager = state.0.lock().map_err(|e| e.to_string())?;
-    manager.call(&method, params)
+    state.0.call(&method, params).await
 }
 
 #[tauri::command]

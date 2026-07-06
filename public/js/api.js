@@ -2,10 +2,8 @@
 // ============================================================
 async function apiJson(url, opts) {
   if (typeof MR !== 'undefined' && MR.invoke && (!opts || !opts._noTauri)) {
-    console.log('[apiJson] using Tauri route:', url);
     return apiJsonTauri(url, opts);
   }
-  console.warn('[apiJson] falling back to fetch:', url, 'MR.invoke:', typeof MR !== 'undefined' ? typeof MR.invoke : 'MR undefined');
   opts = opts || {};
   var timeoutMs = Number(opts.timeoutMs) || 0;
   var fetchOpts = Object.assign({}, opts);
@@ -49,21 +47,15 @@ async function apiJsonTauri(url, opts) {
     }
     if (MR.sidecar) {
       var method = tauriRouteToMethod(pn);
-      console.log('[apiJsonTauri] sidecar branch:', pn, 'method:', method, 'MR.sidecar:', !!MR.sidecar);
       if (method) {
         var params = {};
         u.searchParams.forEach(function(v,k){ params[k] = v; });
         if (opts && opts.method === 'POST' && opts.body) {
           try { Object.assign(params, JSON.parse(opts.body)); } catch(e) {}
         }
-        console.log('[apiJsonTauri] calling sidecar:', method, params);
         var result = await MR.sidecar.call(method, params);
-        console.log('[apiJsonTauri] sidecar result:', result);
         return result;
       }
-      console.warn('[apiJsonTauri] no method mapping for:', pn);
-    } else {
-      console.warn('[apiJsonTauri] MR.sidecar not available');
     }
     var res = await fetch(url, opts);
     return res.json();
@@ -89,6 +81,7 @@ function tauriRouteToMethod(pn) {
     '/api/qq/search':'qq_search','/api/qq/song/url':'qq_song_url','/api/qq/lyric':'qq_lyric',
     '/api/qq/user/playlists':'qq_user_playlists','/api/qq/playlist/tracks':'qq_playlist_tracks',
     '/api/qq/login/cookie':'qq_login_cookie','/api/qq/login/status':'qq_login_status','/api/qq/logout':'qq_logout',
+    '/api/qq/login/qr/key':'qq_qr_key','/api/qq/login/qr/create':'qq_qr_create','/api/qq/login/qr/check':'qq_qr_check',
   };
   return map[pn] || null;
 }

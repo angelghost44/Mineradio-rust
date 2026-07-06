@@ -290,19 +290,15 @@ function updateLoginProviderUi() {
   var qqCard = document.getElementById('qq-web-login-card');
   var neteaseBtn = document.getElementById('login-provider-netease');
   var qqBtn = document.getElementById('login-provider-qq');
-  var canOpenNeteaseWeb = !!(window.desktopWindow && typeof window.desktopWindow.openNeteaseMusicLogin === 'function');
+  var canOpenNeteaseWeb = false;
   if (neteaseBtn) neteaseBtn.classList.toggle('active', loginProvider === 'netease');
   if (qqBtn) qqBtn.classList.toggle('active', isQQ);
   if (title) title.textContent = '扫码登录' + meta.label;
   if (desc) desc.innerHTML = isQQ
-    ? '打开 <b>QQ 音乐官方网页登录窗口</b> 扫码，成功后会自动同步账号会话。'
-    : (canOpenNeteaseWeb
-      ? '打开 <b>网易云音乐官方网页登录窗口</b> 扫码，避开接口二维码风控；成功后会自动同步账号会话。'
-      : '使用 <b>网易云音乐 App</b> 扫码，可同步歌单、红心与播客。');
+    ? '使用 <b>QQ App</b> 扫码登录，可同步歌单与播放。'
+    : '使用 <b>网易云音乐 App</b> 扫码，可同步歌单、红心与播客。';
   if (shell) {
-    shell.classList.toggle('web-login-preview', isQQ || canOpenNeteaseWeb);
-    shell.classList.toggle('qq-preview', isQQ);
-    shell.classList.toggle('netease-preview', !isQQ && canOpenNeteaseWeb);
+    shell.classList.remove('web-login-preview', 'qq-preview', 'netease-preview');
   }
   if (qqPanel) qqPanel.classList.toggle('show', isQQ && qqManualCookieOpen);
   if (qqCookieToggle) {
@@ -319,40 +315,34 @@ function updateLoginProviderUi() {
       : (neteaseWebLoginBusy ? '等待扫码确认' : '打开官方登录窗口');
   }
   if (st) {
-    st.className = isQQ ? 'preview' : '';
+    st.className = isQQ ? '' : '';
     st.textContent = isQQ
-      ? (qqLoginStatus.loggedIn ? ('已保存 QQ 音乐会话 · ' + (qqLoginStatus.nickname || '')) : '点击“扫码登录”打开 QQ 音乐官方窗口')
-      : (canOpenNeteaseWeb ? '点击“网页登录”打开网易云官方窗口' : '正在生成二维码…');
+      ? (qqLoginStatus.loggedIn ? ('已保存 QQ 音乐会话 · ' + (qqLoginStatus.nickname || '')) : '正在生成二维码…')
+      : (loginStatus.loggedIn ? ('已保存网易云会话 · ' + (loginStatus.nickname || '')) : '正在生成二维码…');
   }
   if (refreshBtn) {
     refreshBtn.disabled = isQQ ? !!qqWebLoginBusy : !!neteaseWebLoginBusy;
-    refreshBtn.textContent = isQQ ? (qqWebLoginBusy ? '等待扫码…' : '扫码登录') : (canOpenNeteaseWeb ? (neteaseWebLoginBusy ? '等待扫码…' : '网页登录') : '刷新二维码');
-    refreshBtn.onclick = isQQ ? openQQWebLogin : (canOpenNeteaseWeb ? openNeteaseWebLogin : refreshQr);
+    refreshBtn.textContent = '刷新二维码';
+    refreshBtn.onclick = refreshQr;
   }
 }
 async function refreshQr() {
   stopQrPoll();
   updateLoginProviderUi();
   if (loginProvider === 'qq') {
-    qrKey = null;
-    var qqStatus = document.getElementById('qr-status');
-    var qqImg = document.getElementById('qr-img');
-    if (qqImg) qqImg.src = '';
-    var info = await refreshQQLoginStatus();
-    if (qqStatus) {
-      qqStatus.textContent = info && info.loggedIn ? ('已保存 QQ 音乐会话 · ' + (info.nickname || '')) : '点击“扫码登录”打开 QQ 音乐官方窗口';
-      qqStatus.className = 'preview';
-    }
-    return;
-  }
-  if (window.desktopWindow && typeof window.desktopWindow.openNeteaseMusicLogin === 'function') {
-    qrKey = null;
-    var neImg = document.getElementById('qr-img');
-    var neStatus = document.getElementById('qr-status');
-    if (neImg) neImg.src = '';
-    if (neStatus) {
-      neStatus.textContent = loginStatus.loggedIn ? ('已保存网易云会话 · ' + (loginStatus.nickname || '')) : '点击“网页登录”打开网易云官方窗口';
-      neStatus.className = 'preview';
+    var qqImgEl = document.getElementById('qr-img');
+    if (qqImgEl) qqImgEl.src = '';
+    document.getElementById('qr-status').textContent = '正在获取 QQ 二维码…';
+    try {
+      var qqQr = await apiJson('/api/qq/login/qr/key');
+      if (!qqQr || !qqQr.img) throw new Error('获取 QQ 二维码失败');
+      qrKey = qqQr.key || 'qq_qrsig';
+      document.getElementById('qr-img').src = qqQr.img;
+      document.getElementById('qr-status').textContent = '请使用 QQ App 扫码';
+      startQrPoll();
+    } catch (e) {
+      document.getElementById('qr-status').textContent = '出错: ' + e.message;
+      document.getElementById('qr-status').className = 'fail';
     }
     return;
   }
@@ -514,27 +504,41 @@ async function submitQQCookieLogin() {
 async function checkQr() {
   if (!qrKey) return;
   try {
-    var r = await apiJson('/api/login/qr/check?key=' + encodeURIComponent(qrKey));
+    var isQQ = loginProvider === 'qq';
+    var checkUrl = isQQ
+      ? '/api/qq/login/qr/check'
+      : '/api/login/qr/check?key=' + encodeURIComponent(qrKey);
+    var r = await apiJson(checkUrl);
     var $st = document.getElementById('qr-status');
     if (r.code === 800) { $st.textContent = '二维码已过期, 请刷新'; $st.className = 'fail'; stopQrPoll(); }
-    else if (r.code === 801) { $st.textContent = '请在 App 中扫码'; $st.className = ''; }
+    else if (r.code === 801) { $st.textContent = isQQ ? '请使用 QQ App 扫码' : '请在 App 中扫码'; $st.className = ''; }
     else if (r.code === 802) { $st.textContent = '已扫码, 请在手机确认…'; $st.className = 'scan'; }
     else if (r.code === 803 && (r.loggedIn || r.hasCookie)) {
-      $st.textContent = r.pendingProfile ? '登录成功，正在同步账号资料…' : '登录成功！'; $st.className = 'scan';
+      $st.textContent = '登录成功！'; $st.className = 'scan';
       stopQrPoll();
-      loginStatus = r.loggedIn ? r : Object.assign({}, r, { loggedIn: true, pendingProfile: true, nickname: r.nickname || '网易云用户' });
-      activeAccountProvider = 'netease';
-      renderUserBtn();
-      setTimeout(async function(){
-        var fresh = await refreshLoginStatus(true);
-        if (!fresh || !fresh.loggedIn) {
-          loginStatus = Object.assign({}, loginStatus, { loggedIn: true, pendingProfile: true });
-          renderUserBtn();
-          fresh = loginStatus;
-        }
-        closeLoginModal();
-        showToast('欢迎 ' + (fresh && fresh.nickname ? fresh.nickname : ''));
-      }, r.pendingProfile ? 1200 : 500);
+      if (isQQ) {
+        qqLoginStatus = { loggedIn: true, nickname: r.nickname || '' };
+        activeAccountProvider = 'qq';
+        renderUserBtn();
+        setTimeout(function(){
+          closeLoginModal();
+          showToast('QQ 音乐已登录');
+        }, 500);
+      } else {
+        loginStatus = r.loggedIn ? r : Object.assign({}, r, { loggedIn: true, pendingProfile: true, nickname: r.nickname || '网易云用户' });
+        activeAccountProvider = 'netease';
+        renderUserBtn();
+        setTimeout(async function(){
+          var fresh = await refreshLoginStatus(true);
+          if (!fresh || !fresh.loggedIn) {
+            loginStatus = Object.assign({}, loginStatus, { loggedIn: true, pendingProfile: true });
+            renderUserBtn();
+            fresh = loginStatus;
+          }
+          closeLoginModal();
+          showToast('欢迎 ' + (fresh && fresh.nickname ? fresh.nickname : ''));
+        }, r.pendingProfile ? 1200 : 500);
+      }
     } else if (r.code === 803) {
       $st.textContent = '扫码已确认，但没有拿到登录凭证，请刷新二维码重试'; $st.className = 'fail';
       stopQrPoll();

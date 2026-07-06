@@ -23,3 +23,26 @@ Thumbs.db
 
 # Logs
 *.log
+
+# QQ test/debug scripts and temp files
+hash33_test*.py
+c_login_2*.js
+xlogin.html
+qq_qr*.png
+qq_c*.txt
+qq_cookies*.txt
+sidecar/.cookie
+*_test.py
+*_test2.py
+*_test3.py
+proxy_test*.py
+post_test.py
+path_test.py
+code7_test.py
+curl_test.py
+final_test.py
+hash33_verify.py
+
+# Secrets / keys
+src-tauri/update-key.pem
+src-tauri/update-key.pem.pub

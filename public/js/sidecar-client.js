@@ -10,15 +10,12 @@
 
   function invoke(method, params) {
     if (typeof MR.invoke !== 'function') {
-      console.warn('[MR.sidecar] MR.invoke not available');
       return Promise.reject(new Error('Not in Tauri'));
     }
-    console.log('[MR.sidecar] calling:', method, params);
     return MR.invoke('sidecar_call', { method: method, params: params || {} }).then(function(r){
-      console.log('[MR.sidecar] result:', method, r);
       return r;
     }).catch(function(e){
-      console.error('[MR.sidecar] error:', method, e, typeof e, e && e.message);
+      console.error('[MR.sidecar] error:', method, e);
       throw e;
     });
   }
