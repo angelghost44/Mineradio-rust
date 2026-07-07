@@ -35,7 +35,7 @@ body.desktop-shell #desktop-titlebar::after{content:none}
 .desktop-mode-btn.on{color:#fff;border-color:rgba(255,83,103,.50);background:rgba(255,83,103,.13);box-shadow:0 12px 34px rgba(255,83,103,.09),inset 0 1px 0 rgba(255,255,255,.08)}
 .desktop-mode-btn.on::before{background:#ff5367;box-shadow:0 0 16px rgba(255,83,103,.56)}
 body.desktop-shell #desktop-titlebar #visual-guide-btn,
-body.desktop-shell #desktop-titlebar #update-entry{width:30px;height:30px;border-radius:10px;box-shadow:none;background:rgba(4,8,10,.42);border-color:rgba(255,255,255,.08);color:rgba(224,250,255,.70);backdrop-filter:none;-webkit-backdrop-filter:none}
+body.desktop-shell #desktop-titlebar #update-entry{width:30px;height:30px;border-radius:10px;box-shadow:none;background:rgba(4,8,10,.42);border-color:rgba(255,255,255,.08);color:rgba(224,250,255,.70);backdrop-filter:none;-webkit-backdrop-filter:none;overflow:hidden;flex:0 0 auto;align-self:center;line-height:1}
 body.desktop-shell #desktop-titlebar #visual-guide-btn{font-size:14px}
 body.desktop-shell #desktop-titlebar #update-entry.available{display:flex}
 body.desktop-shell #desktop-titlebar #update-entry svg{width:18px;height:18px}

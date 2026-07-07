@@ -1543,7 +1543,7 @@ function setControlsHidden(hidden) {
   var bar = document.getElementById('bottom-bar');
   if (!bar) return;
   if (hidden && (controlsHovering || miniQueueOpen)) hidden = false;
-  bar.classList.toggle('soft-hidden', !!hidden && controlsAutoHide && bar.classList.contains('visible'));
+  bar.classList.toggle('soft-hidden', !!hidden && bar.classList.contains('visible'));
   bar.style.pointerEvents = '';
   updateControlsChromeState();
 }
@@ -1575,11 +1575,10 @@ function suppressBottomControlsForShelf(duration) {
 
 function scheduleControlsHide(delay) {
   if (controlsHideTimer) clearTimeout(controlsHideTimer);
-  if (!controlsAutoHide) return;
   controlsHideTimer = setTimeout(function(){
     controlsHideTimer = null;
     if (!controlsHovering) setControlsHidden(true);
-  }, delay == null ? 480 : delay);
+  }, delay == null ? 2000 : delay);
 }
 
 function revealBottomControls(delay) {
@@ -1589,7 +1588,7 @@ function revealBottomControls(delay) {
   if (bar) bar.classList.add('visible');
   wakeBottomHandle();
   setControlsHidden(false);
-  if (controlsAutoHide) scheduleControlsHide(delay == null ? 520 : delay);
+  scheduleControlsHide(delay == null ? 2000 : delay);
 }
 
 function updateControlsChromeState() {
@@ -1614,13 +1613,7 @@ function forcePlaybackControlsInteractive() {
   try {
     document.body.classList.remove('home-controls-locked');
     var bar = document.getElementById('bottom-bar');
-    if (bar) {
-      bar.style.pointerEvents = '';
-      if (!controlsAutoHide) {
-        bar.classList.add('visible');
-        bar.classList.remove('soft-hidden');
-      }
-    }
+    if (bar) bar.style.pointerEvents = '';
     ['play-btn', 'prev-btn', 'next-btn', 'mini-queue-btn', 'heart-btn', 'play-mode-btn', 'collect-btn'].forEach(function(id){
       var btn = document.getElementById(id);
       if (!btn) return;
@@ -1628,7 +1621,7 @@ function forcePlaybackControlsInteractive() {
       btn.classList.remove('busy');
     });
     updateControlsChromeState();
-    if (bar && bar.classList.contains('visible') && controlsAutoHide && !controlsHovering) scheduleControlsHide(220);
+    revealBottomControls(2000);
   } catch (e) {
     console.warn('[PlaybackControlsRestore]', e);
   }
@@ -1638,15 +1631,21 @@ function toggleBottomControlsFromHandle() {
   var bar = document.getElementById('bottom-bar');
   if (!bar || document.body.classList.contains('home-controls-locked')) return;
   if (isBottomControlsSuppressedForShelf()) return;
-  revealBottomControls(900);
+  revealBottomControls(2000);
 }
 
 function updateControlsAutoHideFromPointer(x, y) {
   if (document.body.classList.contains('home-controls-locked')) return;
   if (isBottomControlsSuppressedForShelf()) return;
   var bar = document.getElementById('bottom-bar');
-  if (!bar || !bar.classList.contains('visible')) return;
-  if (!controlsAutoHide) { setControlsHidden(false); return; }
+  if (!bar) return;
+  var H = window.innerHeight;
+  var atBottomEdge = y >= H - 12;
+  var barVisible = bar.classList.contains('visible') && !bar.classList.contains('soft-hidden');
+  if (!barVisible) {
+    if (atBottomEdge) revealBottomControls(2000);
+    return;
+  }
   if (diyPlayerMode) {
     var fxPanel = document.getElementById('fx-panel');
     var fxFab = document.getElementById('fx-fab');
@@ -1669,8 +1668,8 @@ function updateControlsAutoHideFromPointer(x, y) {
   var miniRect = mini ? mini.getBoundingClientRect() : null;
   var overMini = miniQueueOpen && miniRect && x >= miniRect.left - 16 && x <= miniRect.right + 16 && y >= miniRect.top - 16 && y <= miniRect.bottom + 16;
   if (overHandle) wakeBottomHandle();
-  if (overBar || overMini || overHandle) revealBottomControls(overHandle ? 900 : 520);
-  else scheduleControlsHide(70);
+  if (overBar || overMini || overHandle || atBottomEdge) revealBottomControls(2000);
+  else scheduleControlsHide(2000);
 }
 
 function toggleControlsAutoHide() {
@@ -1710,7 +1709,7 @@ function applyControlsAutoHidePreference() {
   }
   function leaveControls(){
     controlsHovering = false;
-    scheduleControlsHide(70);
+    scheduleControlsHide(2000);
     wakeBottomHandle(900);
   }
   bar.addEventListener('mouseenter', enterControls);
@@ -1718,7 +1717,7 @@ function applyControlsAutoHidePreference() {
   if (handle) {
     handle.addEventListener('mouseenter', function(){
       controlsHovering = true;
-      revealBottomControls(900);
+      revealBottomControls(2000);
     });
     handle.addEventListener('mouseleave', leaveControls);
     handle.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); toggleBottomControlsFromHandle(); });

@@ -73,7 +73,8 @@ function tauriRouteToMethod(pn) {
     '/api/playlist/track/all':'playlist_track_all','/api/playlist/detail':'playlist_detail',
     '/api/playlist/add-song':'playlist_add_song','/api/playlist/create':'playlist_create',
     '/api/song/like':'like_song','/api/song/like/check':'likelist',
-    '/api/discover/home':'personalized',
+    '/api/discover/home':'discover_home',
+    '/api/weather/ip-location':'weather_ip_location','/api/weather/radio':'weather_radio',
     '/api/artist/detail':'artist_detail','/api/artist/top/song':'artist_top_song','/api/artist/songs':'artist_songs',
     '/api/comment/music':'comment_music',
     '/api/podcast/hot':'dj_hot','/api/podcast/programs':'dj_program','/api/podcast/detail':'dj_detail',
@@ -82,6 +83,8 @@ function tauriRouteToMethod(pn) {
     '/api/qq/user/playlists':'qq_user_playlists','/api/qq/playlist/tracks':'qq_playlist_tracks',
     '/api/qq/login/cookie':'qq_login_cookie','/api/qq/login/status':'qq_login_status','/api/qq/logout':'qq_logout',
     '/api/qq/login/qr/key':'qq_qr_key','/api/qq/login/qr/create':'qq_qr_create','/api/qq/login/qr/check':'qq_qr_check',
+    '/api/qq/artist/detail':'qq_artist_detail','/api/qq/song/comments':'qq_song_comments',
+    '/api/song/comments':'comment_music',
   };
   return map[pn] || null;
 }
@@ -718,6 +721,8 @@ async function loadHomeWeatherRadio(force, opts) {
   }
 }
 function scheduleHomeWeatherLoad(delay) {
+  // 如果已在加载或已加载完成，无需再延迟调度
+  if (homeWeatherRadioState.loading || homeWeatherRadioState.loaded) return;
   if (homeWeatherLoadTimer) return;
   homeWeatherLoadTimer = setTimeout(function(){
     homeWeatherLoadTimer = null;
@@ -879,22 +884,18 @@ function setHomeControlsLocked(locked) {
   document.body.classList.toggle('home-controls-locked', !!locked);
   var bottom = document.getElementById('bottom-bar');
   if (bottom && locked && !hasActivePlaybackControls()) bottom.classList.add('soft-hidden');
-  if (bottom && !locked) bottom.classList.remove('soft-hidden');
+  if (bottom && !locked) {
+    bottom.classList.remove('soft-hidden');
+    if (!hasActivePlaybackControls()) {
+      bottom.classList.remove('visible');
+      if (typeof updateControlsChromeState === 'function') updateControlsChromeState();
+    }
+  }
   if (locked) closeMiniQueue();
 }
 function openHomePlayerConsole() {
   setHomeControlsLocked(false);
-  var bar = document.getElementById('bottom-bar');
-  if (bar) {
-    bar.classList.add('visible');
-    bar.classList.remove('soft-hidden');
-    bar.style.pointerEvents = '';
-  }
-  wakeBottomHandle(2800);
-  setControlsHidden(false);
-  forcePlaybackControlsInteractive();
-  updateControlsChromeState();
-  if (controlsAutoHide) scheduleControlsHide(1800);
+  revealBottomControls(2000);
   showToast('播放器控制台已展开');
 }
 function ensureHomeWallpaperParticles(opts) {
@@ -1458,7 +1459,9 @@ function goHome() {
   }
   homeSuppressed = false;
   homeForcedOpen = true;
-  setHomeControlsLocked(true);
+  var bottomBar = document.getElementById('bottom-bar');
+  if (bottomBar) { bottomBar.classList.remove('visible'); bottomBar.classList.remove('soft-hidden'); }
+  if (typeof updateControlsChromeState === 'function') updateControlsChromeState();
   if (shelfManager && shelfManager.hasOpenContent && shelfManager.hasOpenContent()) safeShelfCloseContent('open-empty-home');
   if (typeof setShelfPinnedOpen === 'function') setShelfPinnedOpen(false, true);
   togglePlaylistPanel(false);

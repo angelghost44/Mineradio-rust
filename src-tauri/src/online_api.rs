@@ -14,6 +14,7 @@ use rand::Rng;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::pin::Pin;
 
 type Aes128CbcEnc = cbc::Encryptor<Aes128>;
 type Aes128EcbEnc = ecb::Encryptor<Aes128>;
@@ -292,19 +293,23 @@ impl OnlineApiState {
             "qq_qr_key" => self.qq_qr_key().await,
             "qq_qr_create" => self.qq_qr_create(&params).await,
             "qq_qr_check" => self.qq_qr_check(&params).await,
+            "qq_artist_detail" => self.qq_artist_detail(&params).await,
+            "qq_song_comments" => self.qq_song_comments(&params).await,
             "qq_login_cookie" => {
                 let c = params["cookie"].as_str().unwrap_or("");
                 self.set_qq_cookie(c);
                 Ok(json!({"ok": true}))
             }
-            "qq_login_status" => {
-                let c = self.get_qq_cookie();
-                Ok(json!({"loggedIn": !c.is_empty(), "cookie": c}))
-            }
+            "qq_login_status" => self.qq_login_status().await,
             "qq_logout" => {
                 self.set_qq_cookie("");
                 Ok(json!({"ok": true}))
             }
+
+            // ---- weather & discover ----
+            "weather_ip_location" => self.weather_ip_location().await,
+            "weather_radio" => self.weather_radio(&params).await,
+            "discover_home" => self.discover_home(&cookie).await,
 
             // ---- update check ----
             "check_update" => self.check_update().await,
@@ -919,6 +924,51 @@ impl OnlineApiState {
             .map_err(|e| format!("QQ JSON parse error: {}", e))
     }
 
+    /// POST JSON 到 QQ musicu.fcg 接口
+    async fn qq_musicu_request(&self, payload: &Value, use_cookie: bool) -> Result<Value, String> {
+        let body = serde_json::to_string(payload).unwrap_or_default();
+        let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+        let mut req = self.client
+            .post("https://u.y.qq.com/cgi-bin/musicu.fcg")
+            .header("Content-Type", "application/json;charset=UTF-8")
+            .header("User-Agent", ua)
+            .header("Referer", "https://y.qq.com/")
+            .body(body);
+        if use_cookie {
+            let cookie = self.get_qq_cookie();
+            if !cookie.is_empty() {
+                req = req.header("Cookie", &cookie);
+            }
+        }
+        let resp = req.send().await
+            .map_err(|e| format!("QQ musicu HTTP error: {}", e))?;
+        resp.json::<Value>().await
+            .map_err(|e| format!("QQ musicu JSON error: {}", e))
+    }
+
+    /// GET 请求 QQ API，带 query 参数、Referer、Cookie
+    async fn qq_get(&self, url: &str, params: &[(&str, &str)], referer: &str) -> Result<Value, String> {
+        let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+        let cookie = self.get_qq_cookie();
+        let mut full_url = url.to_string();
+        let mut first = true;
+        for (k, v) in params {
+            full_url.push_str(if first { "?" } else { "&" });
+            first = false;
+            full_url.push_str(&format!("{}={}", k, v));
+        }
+        let resp = self.client
+            .get(&full_url)
+            .header("User-Agent", ua)
+            .header("Referer", referer)
+            .header("Cookie", &cookie)
+            .send()
+            .await
+            .map_err(|e| format!("QQ HTTP error: {}", e))?;
+        resp.json::<Value>().await
+            .map_err(|e| format!("QQ JSON parse error: {}", e))
+    }
+
     async fn qq_search(&self, params: &Value) -> Result<Value, String> {
         let q = params["q"].as_str().unwrap_or("");
         let limit = params["limit"].as_i64().unwrap_or(20);
@@ -1368,22 +1418,652 @@ impl OnlineApiState {
         }
     }
 
-    async fn qq_user_playlists(&self, _params: &Value) -> Result<Value, String> {
-        // QQ Music user playlists require a specific API that's not commonly used
-        // Return empty for now
-        Ok(json!({"playlist": []}))
+    /// QQ 登录状态：返回昵称、头像、VIP 等完整个人资料
+    async fn qq_login_status(&self) -> Result<Value, String> {
+        let cookie = self.get_qq_cookie();
+        let uin = qq_cookie_uin(&cookie);
+        let music_key = qq_cookie_music_key(&cookie);
+
+        if uin.is_empty() || music_key.is_empty() {
+            return Ok(json!({
+                "provider": "qq",
+                "loggedIn": false,
+                "hasCookie": !cookie.is_empty(),
+            }));
+        }
+
+        let nick_fallback = qq_cookie_nickname(&cookie, &uin);
+        let avatar_fallback = format!("https://q1.qlogo.cn/g?b=qq&nk={}&s=100", uin);
+
+        let profile_url = "https://c.y.qq.com/rsc/fcgi-bin/fcg_get_profile_homepage.fcg";
+        let uin_ref = uin.as_str();
+        let params: Vec<(&str, &str)> = vec![
+            ("cid", "205360838"), ("userid", uin_ref), ("reqfrom", "1"),
+            ("g_tk", "5381"), ("loginUin", uin_ref), ("hostUin", "0"),
+            ("format", "json"), ("inCharset", "utf8"), ("outCharset", "utf-8"),
+            ("notice", "0"), ("platform", "yqq.json"), ("needNewCode", "0"),
+        ];
+
+        match self.qq_get(profile_url, &params, "https://y.qq.com/portal/profile.html").await {
+            Ok(body) => {
+                let data = &body["data"];
+                let creator = &data["creator"];
+                let nick = creator["nick"].as_str()
+                    .or_else(|| creator["nickname"].as_str())
+                    .or_else(|| creator["name"].as_str())
+                    .unwrap_or(&nick_fallback);
+                let avatar = creator["headpic"].as_str()
+                    .or_else(|| creator["avatar"].as_str())
+                    .unwrap_or(&avatar_fallback);
+                let vip_type = data["vipInfo"]["vipType"].as_i64()
+                    .or_else(|| data["vipInfo"]["vip_type"].as_i64())
+                    .or_else(|| creator["vipType"].as_i64())
+                    .unwrap_or(0);
+
+                let profile_unavailable = body["code"].as_i64() == Some(1000)
+                    || body["result"].as_i64() == Some(301);
+
+                Ok(json!({
+                    "provider": "qq",
+                    "loggedIn": true,
+                    "userId": uin,
+                    "nickname": nick,
+                    "avatar": avatar,
+                    "vipType": vip_type,
+                    "hasCookie": true,
+                    "profileUnavailable": profile_unavailable,
+                }))
+            }
+            Err(_) => Ok(json!({
+                "provider": "qq",
+                "loggedIn": true,
+                "userId": uin,
+                "nickname": nick_fallback,
+                "avatar": avatar_fallback,
+                "vipType": 0,
+                "hasCookie": true,
+                "profileUnavailable": true,
+            })),
+        }
     }
 
-    async fn qq_playlist_tracks(&self, _params: &Value) -> Result<Value, String> {
-        Ok(json!({"songs": []}))
+    /// QQ 用户歌单：获取创建 + 收藏的歌单
+    async fn qq_user_playlists(&self, _params: &Value) -> Result<Value, String> {
+        let cookie = self.get_qq_cookie();
+        let uin = qq_cookie_uin(&cookie);
+        let music_key = qq_cookie_music_key(&cookie);
+
+        if uin.is_empty() || music_key.is_empty() {
+            return Ok(json!({"loggedIn": false, "provider": "qq", "playlists": []}));
+        }
+
+        let uin_ref = uin.as_str();
+
+        // 创建的歌单
+        let created_params: Vec<(&str, &str)> = vec![
+            ("hostUin", "0"), ("hostuin", uin_ref), ("sin", "0"), ("size", "200"),
+            ("g_tk", "5381"), ("loginUin", uin_ref), ("format", "json"),
+            ("inCharset", "utf8"), ("outCharset", "utf-8"), ("notice", "0"),
+            ("platform", "yqq.json"), ("needNewCode", "0"),
+        ];
+        let created = self.qq_get(
+            "https://c.y.qq.com/rsc/fcgi-bin/fcg_user_created_diss",
+            &created_params,
+            "https://y.qq.com/portal/profile.html",
+        ).await.ok();
+
+        // 收藏的歌单
+        let collect_params: Vec<(&str, &str)> = vec![
+            ("ct", "20"), ("cid", "205360956"), ("userid", uin_ref),
+            ("reqtype", "3"), ("sin", "0"), ("ein", "80"),
+        ];
+        let collected = self.qq_get(
+            "https://c.y.qq.com/fav/fcgi-bin/fcg_get_profile_order_asset.fcg",
+            &collect_params,
+            "https://y.qq.com/portal/profile.html",
+        ).await.ok();
+
+        let mut playlists: Vec<Value> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        if let Some(ref c) = created {
+            if let Some(list) = c["data"]["disslist"].as_array() {
+                for pl in list {
+                    let mapped = map_qq_playlist(pl, "created");
+                    if let Some(id) = mapped["id"].as_str().map(|s| s.to_string()) {
+                        if !id.is_empty() && seen.insert(id) {
+                            playlists.push(mapped);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(ref c) = collected {
+            if let Some(list) = c["data"]["cdlist"].as_array() {
+                for pl in list {
+                    let mapped = map_qq_playlist(pl, "collect");
+                    if let Some(id) = mapped["id"].as_str().map(|s| s.to_string()) {
+                        if !id.is_empty() && seen.insert(id) {
+                            playlists.push(mapped);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(json!({
+            "loggedIn": true,
+            "provider": "qq",
+            "userId": uin,
+            "playlists": playlists,
+        }))
+    }
+
+    /// QQ 歌单歌曲列表
+    async fn qq_playlist_tracks(&self, params: &Value) -> Result<Value, String> {
+        let cookie = self.get_qq_cookie();
+        let uin = qq_cookie_uin(&cookie);
+        let uin_str = if uin.is_empty() { "0".to_string() } else { uin.clone() };
+
+        let id = params["id"].as_str()
+            .or_else(|| params["disstid"].as_str())
+            .unwrap_or("");
+        if id.is_empty() {
+            return Ok(json!({"provider": "qq", "error": "Missing playlist id", "tracks": []}));
+        }
+
+        let qp: Vec<(&str, &str)> = vec![
+            ("type", "1"), ("utf8", "1"), ("disstid", id),
+            ("loginUin", &uin_str), ("format", "json"),
+            ("inCharset", "utf8"), ("outCharset", "utf-8"),
+            ("notice", "0"), ("platform", "yqq.json"), ("needNewCode", "0"),
+        ];
+        let result = self.qq_get(
+            "https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg",
+            &qp,
+            "https://y.qq.com/n/yqq/playlist",
+        ).await?;
+
+        let detail = &result["cdlist"][0];
+        let tracks: Vec<Value> = detail["songlist"].as_array()
+            .map(|arr| {
+                arr.iter()
+                    .map(|raw| map_qq_track(raw, &Value::Null))
+                    .filter(|s| {
+                        let name = s["name"].as_str().unwrap_or("");
+                        let id = s["id"].as_str().unwrap_or("");
+                        !name.is_empty() && !id.is_empty()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let playlist = json!({
+            "provider": "qq",
+            "id": id,
+            "name": detail["dissname"].as_str().or_else(|| detail["diss_name"].as_str()).or_else(|| detail["name"].as_str()).unwrap_or(""),
+            "cover": detail["logo"].as_str().or_else(|| detail["diss_cover"].as_str()).unwrap_or(""),
+            "trackCount": tracks.len(),
+        });
+
+        Ok(json!({
+            "provider": "qq",
+            "playlist": playlist,
+            "tracks": tracks,
+        }))
+    }
+
+    /// QQ 歌手主页 + 热门歌曲
+    async fn qq_artist_detail(&self, params: &Value) -> Result<Value, String> {
+        let mid = params["mid"].as_str()
+            .or_else(|| params["singermid"].as_str())
+            .unwrap_or("");
+        if mid.is_empty() {
+            return Ok(json!({
+                "provider": "qq",
+                "error": "MISSING_SINGER_MID",
+                "artist": null,
+                "songs": [],
+            }));
+        }
+
+        let num = param_as_i64(params, "limit", 36).clamp(10, 80);
+        let payload = json!({
+            "comm": {"ct": 24, "cv": 0},
+            "singer": {
+                "module": "music.web_singer_info_svr",
+                "method": "get_singer_detail_info",
+                "param": {"sort": 5, "singermid": mid, "sin": 0, "num": num}
+            }
+        });
+
+        let json = self.qq_musicu_request(&payload, true).await?;
+        let block = &json["singer"];
+        if block["code"].as_i64().unwrap_or(-1) != 0 {
+            return Ok(json!({
+                "provider": "qq",
+                "error": block["message"].as_str().or_else(|| block["msg"].as_str()).unwrap_or("QQ_ARTIST_DETAIL_FAILED"),
+                "artist": null,
+                "songs": [],
+            }));
+        }
+
+        let data = &block["data"];
+        let info = if data["singer_info"].is_object() { &data["singer_info"] } else { &data["singerInfo"] };
+
+        let songs: Vec<Value> = data["songlist"].as_array()
+            .map(|arr| {
+                arr.iter()
+                    .map(|raw| {
+                        let track = if raw["track_info"].is_object() { &raw["track_info"] } else { raw };
+                        map_qq_track(track, &Value::Null)
+                    })
+                    .filter(|s| {
+                        let name = s["name"].as_str().unwrap_or("");
+                        let id = s["id"].as_str().unwrap_or("");
+                        !name.is_empty() && !id.is_empty()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let artist_mid = info["mid"].as_str().unwrap_or(mid);
+        let artist_name = info["name"].as_str().or_else(|| info["title"].as_str()).unwrap_or("");
+        let total_song = data["total_song"].as_i64()
+            .or_else(|| data["song_count"].as_i64())
+            .unwrap_or(songs.len() as i64);
+        let avatar_raw = info["pic"].as_str().or_else(|| info["avatar"].as_str()).unwrap_or("");
+        let avatar = if avatar_raw.is_empty() { qq_singer_avatar(artist_mid, 300) } else { avatar_raw.to_string() };
+
+        Ok(json!({
+            "provider": "qq",
+            "artist": {
+                "provider": "qq",
+                "id": value_as_string(&info["id"]).unwrap_or_default(),
+                "mid": artist_mid,
+                "name": artist_name,
+                "avatar": avatar,
+                "fans": info["fans"].as_i64().unwrap_or(0),
+                "musicSize": total_song,
+                "albumSize": data["total_album"].as_i64().unwrap_or(0),
+                "mvSize": data["total_mv"].as_i64().unwrap_or(0),
+            },
+            "total": total_song,
+            "songs": songs,
+        }))
+    }
+
+    /// QQ 歌曲评论
+    async fn qq_song_comments(&self, params: &Value) -> Result<Value, String> {
+        let cookie = self.get_qq_cookie();
+        let uin = qq_cookie_uin(&cookie);
+        let uin_str = if uin.is_empty() { "0".to_string() } else { uin.clone() };
+
+        // 提取歌曲数字 ID
+        let id_raw = value_as_string(&params["id"])
+            .or_else(|| value_as_string(&params["qqId"]))
+            .unwrap_or_default();
+        let mut topid: String = id_raw.chars().filter(|c| c.is_ascii_digit()).collect();
+
+        let mid = params["mid"].as_str()
+            .or_else(|| params["songmid"].as_str())
+            .unwrap_or("");
+
+        // 如果没有 topid，尝试通过 mid 获取歌曲详情
+        if topid.is_empty() && !mid.is_empty() {
+            let payload = json!({
+                "comm": {"ct": 24, "cv": 0},
+                "songinfo": {
+                    "module": "music.pf_song_detail_svr",
+                    "method": "get_song_detail_yqq",
+                    "param": {"song_mid": mid}
+                }
+            });
+            if let Ok(detail) = self.qq_musicu_request(&payload, false).await {
+                if let Some(id) = detail["songinfo"]["data"]["track_info"]["id"].as_i64() {
+                    topid = id.to_string();
+                }
+            }
+        }
+
+        if topid.is_empty() {
+            return Ok(json!({"provider": "qq", "error": "Missing QQ song id", "comments": []}));
+        }
+
+        let limit = param_as_i64(params, "limit", 20).clamp(6, 50);
+        let offset = param_as_i64(params, "offset", 0).max(0);
+        let page = offset / limit.max(1);
+        let page_str = page.to_string();
+        let limit_str = limit.to_string();
+
+        let referer = format!("https://y.qq.com/n/ryqq/songDetail/{}", mid);
+        let qp: Vec<(&str, &str)> = vec![
+            ("g_tk", "5381"), ("loginUin", &uin_str), ("hostUin", "0"),
+            ("format", "json"), ("inCharset", "utf8"), ("outCharset", "utf-8"),
+            ("notice", "0"), ("platform", "yqq.json"), ("needNewCode", "0"),
+            ("cid", "205360772"), ("reqtype", "2"), ("biztype", "1"),
+            ("topid", &topid), ("cmd", "8"), ("needmusiccrit", "0"),
+            ("pagenum", &page_str), ("pagesize", &limit_str),
+        ];
+
+        let body = self.qq_get(
+            "https://c.y.qq.com/base/fcgi-bin/fcg_global_comment_h5.fcg",
+            &qp,
+            &referer,
+        ).await?;
+
+        let hot_list = body["hot_comment"]["commentlist"].as_array();
+        let normal_list = body["comment"]["commentlist"].as_array();
+        let has_hot = offset == 0 && hot_list.map(|l| !l.is_empty()).unwrap_or(false);
+        let raw = if has_hot { hot_list } else { normal_list };
+
+        let comments: Vec<Value> = raw
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| {
+                        let content = c["rootcommentcontent"].as_str()
+                            .or_else(|| c["content"].as_str())
+                            .unwrap_or("");
+                        if content.is_empty() { return None; }
+                        Some(json!({
+                            "id": c["commentid"],
+                            "content": content,
+                            "likedCount": c["praisenum"].as_i64().unwrap_or(0),
+                            "time": c["time"].as_i64().unwrap_or(0),
+                            "user": {
+                                "id": c["userid"],
+                                "nickname": c["nick"].as_str().unwrap_or(""),
+                                "avatar": c["avatarurl"].as_str().unwrap_or(""),
+                            },
+                        }))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let total = body["comment"]["commenttotal"].as_i64()
+            .or_else(|| body["comment"]["comment_total"].as_i64())
+            .unwrap_or(comments.len() as i64);
+
+        Ok(json!({
+            "provider": "qq",
+            "id": topid,
+            "total": total,
+            "comments": comments,
+            "hot": has_hot,
+        }))
+    }
+
+    // ── Weather & Discover ────────────────────────────────────────────
+
+    /// IP 定位：调 ip-api.com 获取经纬度
+    async fn weather_ip_location(&self) -> Result<Value, String> {
+        let url = "http://ip-api.com/json/?fields=status,message,country,regionName,city,lat,lon,timezone,query&lang=zh-CN";
+        let resp = self.client
+            .get(url)
+            .header("User-Agent", "Mozilla/5.0")
+            .send()
+            .await
+            .map_err(|e| format!("IP location error: {}", e))?;
+        let body: Value = resp.json().await
+            .map_err(|e| format!("IP location JSON error: {}", e))?;
+
+        if body["status"].as_str() != Some("success") {
+            return Ok(json!({
+                "ok": false,
+                "error": body["message"].as_str().unwrap_or("IP_LOCATION_FAILED"),
+                "location": null,
+            }));
+        }
+
+        Ok(json!({
+            "ok": true,
+            "location": {
+                "provider": "ip-api",
+                "city": body["city"].as_str().unwrap_or("上海"),
+                "region": body["regionName"].as_str().unwrap_or(""),
+                "country": body["country"].as_str().unwrap_or(""),
+                "latitude": body["lat"].as_f64().unwrap_or(31.2304),
+                "longitude": body["lon"].as_f64().unwrap_or(121.4737),
+                "timezone": body["timezone"].as_str().unwrap_or("Asia/Shanghai"),
+                "ip": body["query"].as_str().unwrap_or(""),
+            }
+        }))
+    }
+
+    /// 天气电台：Open-Meteo 天气 + 根据心情搜索歌曲
+    async fn weather_radio(&self, params: &Value) -> Result<Value, String> {
+        let lat = params["lat"].as_str()
+            .and_then(|s| s.parse::<f64>().ok())
+            .or_else(|| params["lat"].as_f64());
+        let lon = params["lon"].as_str()
+            .and_then(|s| s.parse::<f64>().ok())
+            .or_else(|| params["lon"].as_f64());
+        let city = params["city"].as_str().unwrap_or("当前位置");
+        let timezone = params["timezone"].as_str().unwrap_or("auto");
+
+        // 1. 获取天气
+        let weather = if let (Some(lat), Some(lon)) = (lat, lon) {
+            self.fetch_open_meteo_weather(lat, lon, city, timezone).await
+        } else {
+            // 尝试 IP 定位
+            match self.weather_ip_location().await {
+                Ok(loc) if loc["ok"].as_bool() == Some(true) => {
+                    let l = &loc["location"];
+                    let lat = l["latitude"].as_f64().unwrap_or(31.2304);
+                    let lon = l["longitude"].as_f64().unwrap_or(121.4737);
+                    let city = l["city"].as_str().unwrap_or("当前位置");
+                    let tz = l["timezone"].as_str().unwrap_or("auto");
+                    self.fetch_open_meteo_weather(lat, lon, city, tz).await
+                }
+                _ => fallback_weather(city, timezone),
+            }
+        };
+
+        // 2. 根据天气心情生成搜索词
+        let mood = build_weather_mood(&weather);
+        let queries = weather_seed_queries(&mood);
+
+        // 3. 并发搜索歌曲（用网易云搜索，不需要登录）
+        let cookie = self.get_cookie();
+        let mut songs: Vec<Value> = Vec::new();
+        let search_futs: Vec<_> = queries.iter().take(4).map(|q| {
+            let data = json!({"s": q, "type": 1, "limit": 6, "offset": 0, "total": true});
+            self.eapi_request("/api/cloudsearch/pc", data, &cookie)
+        }).collect();
+
+        let results = futures_buffered(search_futs).await;
+        for res in results {
+            if let Ok(r) = res {
+                if let Some(arr) = r["body"]["result"]["songs"].as_array() {
+                    for s in arr {
+                        songs.push(map_netease_song(s));
+                    }
+                }
+            }
+        }
+
+        // 4. 去重 + 过滤低质量 + 截取
+        songs = dedup_songs(songs);
+        songs.retain(|s| !is_low_signal_song(s));
+        songs.truncate(18);
+
+        Ok(json!({
+            "ok": true,
+            "weather": weather,
+            "radio": {
+                "title": mood["title"].as_str().unwrap_or("天气电台"),
+                "subtitle": mood["tagline"].as_str().unwrap_or(""),
+                "seedQueries": queries,
+                "songs": songs,
+                "updatedAt": current_millis(),
+            }
+        }))
+    }
+
+    /// 发现页主页：聚合推荐歌单、播客、每日歌曲
+    async fn discover_home(&self, cookie: &str) -> Result<Value, String> {
+        // 直接检查 cookie 是否为空，避免未登录时发起额外网络请求导致超时
+        let logged_in = !cookie.is_empty();
+
+        if !logged_in {
+            return Ok(json!({
+                "loggedIn": false,
+                "user": null,
+                "dailySongs": [],
+                "playlists": [],
+                "podcasts": [],
+                "mode": "starter",
+                "updatedAt": current_millis(),
+            }));
+        }
+
+        // 并发请求：推荐歌单、热门播客、私人推荐、每日歌曲
+        let dj_params = json!({"limit": 6, "offset": 0});
+        let futures: Vec<Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>>> = vec![
+            Box::pin(self.personalized(cookie)),
+            Box::pin(self.dj_hot(&dj_params, cookie)),
+            Box::pin(self.recommend_resource(cookie)),
+            Box::pin(self.recommend_songs(cookie)),
+        ];
+        let results = futures_buffered(futures).await;
+
+        // 推荐歌单
+        let mut playlists: Vec<Value> = Vec::new();
+        if let Ok(r) = &results[0] {
+            if let Some(arr) = r["result"].as_array() {
+                for pl in arr.iter().take(8) {
+                    let mapped = map_discover_playlist(pl, "推荐歌单");
+                    if mapped["id"].as_i64().unwrap_or(0) != 0 || mapped["id"].as_str().is_some() {
+                        playlists.push(mapped);
+                    }
+                }
+            }
+        }
+
+        // 热门播客
+        let mut podcasts: Vec<Value> = Vec::new();
+        if let Ok(r) = &results[1] {
+            if let Some(arr) = r["djRadios"].as_array() {
+                for p in arr.iter().take(6) {
+                    let mapped = map_podcast_radio(p);
+                    podcasts.push(mapped);
+                }
+            }
+        }
+
+        // 私人推荐歌单
+        if let Ok(r) = &results[2] {
+            if let Some(arr) = r["recommend"].as_array() {
+                for pl in arr.iter().take(6) {
+                    let mapped = map_discover_playlist(pl, "私人推荐");
+                    if mapped["id"].as_i64().unwrap_or(0) != 0 || mapped["id"].as_str().is_some() {
+                        playlists.push(mapped);
+                    }
+                }
+            }
+        }
+
+        // 每日推荐歌曲
+        let mut daily_songs: Vec<Value> = Vec::new();
+        if let Ok(r) = &results[3] {
+            if let Some(arr) = r["data"]["dailySongs"].as_array() {
+                for s in arr.iter().take(12) {
+                    daily_songs.push(map_netease_song(s));
+                }
+            } else if let Some(arr) = r["data"]["recommend"].as_array() {
+                for s in arr.iter().take(12) {
+                    daily_songs.push(map_netease_song(s));
+                }
+            }
+        }
+
+        playlists.truncate(10);
+
+        Ok(json!({
+            "loggedIn": true,
+            "user": null,
+            "dailySongs": daily_songs,
+            "playlists": playlists,
+            "podcasts": podcasts,
+            "mode": "member",
+            "updatedAt": current_millis(),
+        }))
+    }
+
+    /// 调用 Open-Meteo 获取天气数据
+    async fn fetch_open_meteo_weather(&self, lat: f64, lon: f64, city: &str, timezone: &str) -> Value {
+        let url = format!(
+            "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m&hourly=precipitation_probability,weather_code,temperature_2m&forecast_days=1&timezone={}",
+            lat, lon, timezone
+        );
+
+        match self.client
+            .get(&url)
+            .header("User-Agent", "Mozilla/5.0")
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                match resp.json::<Value>().await {
+                    Ok(body) => {
+                        let cur = &body["current"];
+                        let code = cur["weather_code"].as_i64().unwrap_or(0);
+                        json!({
+                            "provider": "open-meteo",
+                            "location": {
+                                "name": city,
+                                "latitude": lat,
+                                "longitude": lon,
+                                "timezone": body["timezone"].as_str().unwrap_or(timezone),
+                            },
+                            "label": weather_label(code),
+                            "weatherCode": code,
+                            "temperature": cur["temperature_2m"].as_f64().unwrap_or(0.0),
+                            "apparentTemperature": cur["apparent_temperature"].as_f64().unwrap_or(0.0),
+                            "humidity": cur["relative_humidity_2m"].as_f64().unwrap_or(0.0),
+                            "precipitation": cur["precipitation"].as_f64().unwrap_or(0.0),
+                            "cloudCover": cur["cloud_cover"].as_f64().unwrap_or(0.0),
+                            "windSpeed": cur["wind_speed_10m"].as_f64().unwrap_or(0.0),
+                            "windGusts": cur["wind_gusts_10m"].as_f64().unwrap_or(0.0),
+                            "isDay": cur["is_day"].as_i64().unwrap_or(1),
+                            "time": cur["time"].as_str().unwrap_or(""),
+                            "updatedAt": current_millis(),
+                        })
+                    }
+                    Err(_) => fallback_weather(city, timezone),
+                }
+            }
+            Err(_) => fallback_weather(city, timezone),
+        }
     }
 
     // ── Update check ───────────────────────────────────────────────────
 
     async fn check_update(&self) -> Result<Value, String> {
-        let owner = "XxHuberrr";
-        let repo = "Mineradio";
-        let current = "1.1.0";
+        // TODO: 配置你的 GitHub 仓库地址 (owner/repo)
+        // 在此处填写后才会启用更新检测
+        let owner = "";  // 例如: "your-username"
+        let repo = "";   // 例如: "Mineradio-rust"
+        let current = env!("CARGO_PKG_VERSION");
+
+        if owner.is_empty() || repo.is_empty() {
+            return Ok(json!({
+                "configured": false,
+                "preview": false,
+                "currentVersion": current,
+                "updateAvailable": false,
+                "latestVersion": current,
+                "release": {
+                    "version": current,
+                    "htmlUrl": "",
+                    "downloadUrl": "",
+                    "summary": "更新检测未配置，请在 online_api.rs 中设置 GitHub 仓库地址。",
+                    "notes": [],
+                    "asset": null,
+                },
+            }));
+        }
 
         let url = format!(
             "https://api.github.com/repos/{}/{}/releases/latest",
@@ -1572,6 +2252,447 @@ fn extract_set_cookies(resp: &reqwest::Response) -> String {
     } else {
         cookies.join("; ")
     }
+}
+
+fn value_as_string(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+fn param_as_i64(params: &Value, key: &str, default: i64) -> i64 {
+    params[key].as_i64()
+        .or_else(|| params[key].as_str().and_then(|s| s.parse().ok()))
+        .unwrap_or(default)
+}
+
+fn qq_cookie_uin(cookie: &str) -> String {
+    let raw = parse_cookie_value(cookie, "uin")
+        .or_else(|| parse_cookie_value(cookie, "qqmusic_uin"))
+        .or_else(|| parse_cookie_value(cookie, "wxuin"))
+        .or_else(|| parse_cookie_value(cookie, "p_uin"))
+        .unwrap_or_default();
+    let digits: String = raw.chars().filter(|c| c.is_ascii_digit()).collect();
+    digits.trim_start_matches('0').to_string()
+}
+
+fn qq_cookie_music_key(cookie: &str) -> String {
+    parse_cookie_value(cookie, "qm_keyst")
+        .or_else(|| parse_cookie_value(cookie, "qqmusic_key"))
+        .or_else(|| parse_cookie_value(cookie, "music_key"))
+        .or_else(|| parse_cookie_value(cookie, "p_skey"))
+        .or_else(|| parse_cookie_value(cookie, "skey"))
+        .unwrap_or_default()
+}
+
+fn qq_cookie_nickname(cookie: &str, uin: &str) -> String {
+    let padded = if !uin.is_empty() { format!("0{}", uin) } else { String::new() };
+    for key in &[format!("ptnick_{}", uin), format!("ptnick_{}", padded), "ptnick".to_string(), "nick".to_string(), "nickname".to_string(), "qq_nickname".to_string()] {
+        if let Some(val) = parse_cookie_value(cookie, key) {
+            let decoded = simple_url_decode(&val);
+            if !decoded.is_empty() {
+                return decoded;
+            }
+        }
+    }
+    String::new()
+}
+
+fn simple_url_decode(s: &str) -> String {
+    let mut result = String::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2])) {
+                result.push((h * 16 + l) as char);
+                i += 3;
+                continue;
+            }
+        }
+        if bytes[i] == b'+' {
+            result.push(' ');
+        } else {
+            result.push(bytes[i] as char);
+        }
+        i += 1;
+    }
+    result
+}
+
+fn hex_digit(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn qq_album_cover(album_mid: &str, size: u32) -> String {
+    if album_mid.is_empty() { return String::new(); }
+    format!("https://y.qq.com/music/photo_new/T002R{}x{}M000{}.jpg?max_age=2592000", size, size, album_mid)
+}
+
+fn qq_singer_avatar(singer_mid: &str, size: u32) -> String {
+    if singer_mid.is_empty() { return String::new(); }
+    format!("https://y.qq.com/music/photo_new/T001R{}x{}M000{}.jpg?max_age=2592000", size, size, singer_mid)
+}
+
+fn map_qq_artists(raw: &Value) -> Vec<Value> {
+    raw.as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|a| {
+                    let name = a["name"].as_str().or_else(|| a["title"].as_str()).unwrap_or("");
+                    if name.is_empty() { return None; }
+                    Some(json!({"id": a["id"], "mid": a["mid"], "name": name}))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 统一映射 QQ 歌曲数据，兼容 musicu 和 playlist 两种格式
+fn map_qq_track(track: &Value, fallback: &Value) -> Value {
+    let album = &track["album"];
+    let artists = map_qq_artists(&track["singer"]);
+
+    let mid = track["mid"].as_str()
+        .or_else(|| track["songmid"].as_str())
+        .or_else(|| fallback["mid"].as_str())
+        .unwrap_or("");
+    let album_mid = album["mid"].as_str()
+        .or_else(|| album["pmid"].as_str())
+        .or_else(|| track["albummid"].as_str())
+        .unwrap_or("");
+    let album_name = album["name"].as_str()
+        .or_else(|| album["title"].as_str())
+        .or_else(|| track["albumname"].as_str())
+        .unwrap_or("");
+
+    let artist_names = if !artists.is_empty() {
+        artists.iter().filter_map(|a| a["name"].as_str()).collect::<Vec<_>>().join(" / ")
+    } else {
+        track["singername"].as_str().or_else(|| fallback["artist"].as_str()).unwrap_or("").to_string()
+    };
+    let artists_json = if !artists.is_empty() { json!(artists) } else { fallback["artists"].clone() };
+
+    let media_mid = track["file"]["media_mid"].as_str()
+        .or_else(|| track["strMediaMid"].as_str())
+        .unwrap_or("");
+
+    let qq_id = value_as_string(&track["id"])
+        .or_else(|| value_as_string(&track["songid"]))
+        .or_else(|| value_as_string(&fallback["qqId"]))
+        .unwrap_or_default();
+    let id_value = if !mid.is_empty() { mid.to_string() } else { qq_id.clone() };
+
+    json!({
+        "provider": "qq",
+        "source": "qq",
+        "type": "qq",
+        "id": id_value,
+        "qqId": qq_id,
+        "mid": mid,
+        "songmid": mid,
+        "mediaMid": media_mid,
+        "name": track["name"].as_str().or_else(|| track["title"].as_str()).or_else(|| track["songname"].as_str()).or_else(|| fallback["name"].as_str()).unwrap_or(""),
+        "artist": artist_names,
+        "artists": artists_json,
+        "album": album_name,
+        "albumMid": album_mid,
+        "cover": qq_album_cover(album_mid, 300),
+        "duration": track["interval"].as_i64().unwrap_or(0) * 1000,
+        "fee": if track["pay"]["pay_play"].as_i64().unwrap_or(0) != 0 { 1 } else { 0 },
+        "playable": false,
+    })
+}
+
+fn map_qq_playlist(pl: &Value, kind: &str) -> Value {
+    let id = value_as_string(&pl["dissid"])
+        .or_else(|| value_as_string(&pl["tid"]))
+        .or_else(|| value_as_string(&pl["dirid"]))
+        .or_else(|| value_as_string(&pl["id"]))
+        .or_else(|| value_as_string(&pl["diss_id"]))
+        .unwrap_or_default();
+
+    json!({
+        "provider": "qq",
+        "source": "qq",
+        "id": id,
+        "name": pl["diss_name"].as_str().or_else(|| pl["name"].as_str()).or_else(|| pl["title"].as_str()).unwrap_or(""),
+        "cover": pl["diss_cover"].as_str().or_else(|| pl["logo"].as_str()).or_else(|| pl["picurl"].as_str()).or_else(|| pl["cover"].as_str()).unwrap_or(""),
+        "trackCount": pl["song_cnt"].as_i64().or_else(|| pl["songnum"].as_i64()).or_else(|| pl["total_song_num"].as_i64()).unwrap_or(0),
+        "playCount": pl["listen_num"].as_i64().or_else(|| pl["visitnum"].as_i64()).unwrap_or(0),
+        "creator": pl["hostname"].as_str().or_else(|| pl["nick"].as_str()).unwrap_or("QQ 音乐"),
+        "subscribed": kind == "collect",
+        "specialType": 0,
+    })
+}
+
+// ── Weather & Discover 辅助函数 ──
+
+fn current_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// 并发执行多个 future，按完成顺序收集结果
+async fn futures_buffered<F, T>(futs: Vec<F>) -> Vec<Result<T, String>>
+where
+    F: std::future::Future<Output = Result<T, String>>,
+{
+    let mut results = Vec::with_capacity(futs.len());
+    for f in futs {
+        results.push(f.await);
+    }
+    results
+}
+
+fn weather_label(code: i64) -> &'static str {
+    match code {
+        0 => "晴",
+        1 | 2 => "少云",
+        3 => "阴",
+        45 | 48 => "雾",
+        51 | 53 | 55 => "毛毛雨",
+        56 | 57 => "冻雨",
+        61 | 63 | 65 => "雨",
+        66 | 67 => "冻雨",
+        71 | 73 | 75 | 77 => "雪",
+        80 | 81 | 82 => "阵雨",
+        85 | 86 => "阵雪",
+        95 | 96 | 99 => "雷雨",
+        _ => "天气",
+    }
+}
+
+fn fallback_weather(city: &str, timezone: &str) -> Value {
+    json!({
+        "provider": "open-meteo",
+        "location": {
+            "name": city,
+            "country": "",
+            "admin1": "",
+            "latitude": null,
+            "longitude": null,
+            "timezone": if timezone.is_empty() { "Asia/Shanghai" } else { timezone },
+            "fallback": true,
+        },
+        "label": "天气暂不可用",
+        "weatherCode": null,
+        "temperature": null,
+        "apparentTemperature": null,
+        "humidity": null,
+        "precipitation": null,
+        "cloudCover": null,
+        "windSpeed": null,
+        "windGusts": null,
+        "isDay": null,
+        "time": "",
+        "updatedAt": current_millis(),
+        "mood": {
+            "key": "fallback",
+            "title": "天气电台",
+            "tagline": "天气暂时没有回来，可以先听今日推荐。",
+        }
+    })
+}
+
+fn build_weather_mood(weather: &Value) -> Value {
+    let code = weather["weatherCode"].as_i64().unwrap_or(0);
+    let temp = weather["temperature"].as_f64().unwrap_or(20.0);
+    let apparent = weather["apparentTemperature"].as_f64().unwrap_or(temp);
+    let rain = weather["precipitation"].as_f64().unwrap_or(0.0);
+    let humidity = weather["humidity"].as_f64().unwrap_or(50.0);
+    let _wind = weather["windSpeed"].as_f64().unwrap_or(0.0);
+    let is_day = weather["isDay"].as_i64().unwrap_or(1);
+    let is_night = is_day == 0;
+    let is_rain = rain > 0.0 || [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].contains(&code);
+    let is_snow = [71, 73, 75, 77, 85, 86].contains(&code);
+    let is_cloud = [2, 3, 45, 48].contains(&code);
+    let is_storm = [95, 96, 99].contains(&code);
+    let feels = if apparent.is_finite() { apparent } else { temp };
+
+    let mut mood = json!({
+        "key": "clear",
+        "title": "晴朗电台",
+        "tagline": "让节奏亮一点，像窗边的光",
+        "keywords": ["轻快 华语", "city pop", "indie pop", "chill pop", "阳光 歌单"],
+    });
+
+    if is_storm {
+        mood = json!({
+            "key": "storm",
+            "title": "雷雨电台",
+            "tagline": "低频更厚，适合把世界关小一点",
+            "keywords": ["暗色 R&B", "trip hop", "夜晚 电子", "氛围 摇滚", "雨夜 歌单"],
+        });
+    } else if is_rain {
+        mood = json!({
+            "key": "rain",
+            "title": "雨天电台",
+            "tagline": "留一点潮湿的空间给旋律",
+            "keywords": ["雨天 R&B", "lofi rainy", "华语 慢歌", "dream pop", "雨夜 歌单"],
+        });
+    } else if is_snow || feels <= 3.0 {
+        mood = json!({
+            "key": "snow",
+            "title": "冷空气电台",
+            "tagline": "干净、慢速、带一点冬天的颗粒感",
+            "keywords": ["冬天 民谣", "ambient piano", "日系 冬天", "indie folk", "安静 歌单"],
+        });
+    } else if feels >= 31.0 || humidity >= 78.0 {
+        mood = json!({
+            "key": "humid",
+            "title": "闷热电台",
+            "tagline": "降低密度，留出一点呼吸",
+            "keywords": ["夏日 chill", "bossa nova", "city pop 夏天", "轻电子", "海边 歌单"],
+        });
+    } else if is_cloud {
+        mood = json!({
+            "key": "cloudy",
+            "title": "阴天电台",
+            "tagline": "不急着明亮，先让声音变软",
+            "keywords": ["阴天 华语", "indie rock mellow", "neo soul", "chillhop", "独立 民谣"],
+        });
+    }
+
+    if is_night {
+        mood["title"] = json!("夜色电台");
+        mood["tagline"] = json!("音量放低一点，让夜色参与编曲");
+    }
+
+    mood
+}
+
+fn weather_seed_queries(mood: &Value) -> Vec<String> {
+    let key = mood["key"].as_str().unwrap_or("clear");
+    if key.contains("rain") || key.contains("storm") {
+        return vec!["陈奕迅 阴天快乐".into(), "周杰伦 雨下一整晚".into(), "孙燕姿 遇见".into(), "林宥嘉 说谎".into(), "毛不易 消愁".into()];
+    }
+    if key.contains("snow") || key.contains("cloudy") {
+        return vec!["陈奕迅 好久不见".into(), "莫文蔚 阴天".into(), "李健 贝加尔湖畔".into(), "朴树 平凡之路".into(), "蔡健雅 达尔文".into()];
+    }
+    if key.contains("humid") {
+        return vec!["落日飞车 My Jinji".into(), "告五人 爱人错过".into(), "夏日入侵企画 想去海边".into(), "陈绮贞 旅行的意义".into(), "王若琳 Lost in Paradise".into()];
+    }
+    if key.contains("night") {
+        return vec!["方大同 特别的人".into(), "陶喆 爱很简单".into(), "Frank Ocean Pink + White".into(), "林忆莲 夜太黑".into(), "Norah Jones Don't Know Why".into()];
+    }
+    vec!["孙燕姿 天黑黑".into(), "周杰伦 晴天".into(), "五月天 温柔".into(), "陈奕迅 稳稳的幸福".into(), "王菲".into()]
+}
+
+/// 映射网易云歌曲数据为统一格式
+fn map_netease_song(s: &Value) -> Value {
+    let artists: Vec<Value> = s["ar"].as_array()
+        .or_else(|| s["artists"].as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|a| {
+                    let name = a["name"].as_str().unwrap_or("");
+                    if name.is_empty() { return None; }
+                    Some(json!({"id": a["id"], "name": name}))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let artist_names = artists.iter()
+        .filter_map(|a| a["name"].as_str())
+        .collect::<Vec<_>>()
+        .join(" / ");
+    let album = &s["al"];
+    let album_alt = &s["album"];
+
+    json!({
+        "provider": "netease",
+        "source": "netease",
+        "type": "song",
+        "id": s["id"],
+        "name": s["name"].as_str().unwrap_or(""),
+        "artist": artist_names,
+        "artists": artists,
+        "album": album["name"].as_str().or_else(|| album_alt["name"].as_str()).unwrap_or(""),
+        "cover": album["picUrl"].as_str().or_else(|| album["coverUrl"].as_str()).or_else(|| album_alt["picUrl"].as_str()).unwrap_or(""),
+        "duration": s["dt"].as_i64().or_else(|| s["duration"].as_i64()).unwrap_or(0),
+        "fee": s["fee"],
+    })
+}
+
+fn map_discover_playlist(pl: &Value, tag: &str) -> Value {
+    let id = value_as_string(&pl["id"])
+        .or_else(|| value_as_string(&pl["resourceId"]))
+        .or_else(|| value_as_string(&pl["creativeId"]))
+        .unwrap_or_default();
+
+    json!({
+        "provider": "netease",
+        "source": "netease",
+        "type": "playlist",
+        "id": id,
+        "name": pl["name"].as_str().or_else(|| pl["title"].as_str()).unwrap_or(""),
+        "cover": pl["picUrl"].as_str()
+            .or_else(|| pl["coverImgUrl"].as_str())
+            .or_else(|| pl["coverUrl"].as_str())
+            .or_else(|| pl["uiElement"]["image"]["imageUrl"].as_str())
+            .unwrap_or(""),
+        "trackCount": pl["trackCount"].as_i64().or_else(|| pl["songCount"].as_i64()).unwrap_or(0),
+        "playCount": pl["playCount"].as_i64().or_else(|| pl["playcount"].as_i64()).unwrap_or(0),
+        "creator": pl["creator"]["nickname"].as_str().or_else(|| pl["user"]["name"].as_str()).unwrap_or(""),
+        "tag": tag,
+    })
+}
+
+fn map_podcast_radio(r: &Value) -> Value {
+    let dj = &r["dj"];
+    let id = value_as_string(&r["id"])
+        .or_else(|| value_as_string(&r["rid"]))
+        .unwrap_or_default();
+
+    json!({
+        "id": id,
+        "rid": id,
+        "name": r["name"].as_str().or_else(|| r["radioName"].as_str()).unwrap_or(""),
+        "cover": r["picUrl"].as_str().or_else(|| r["picURL"].as_str()).or_else(|| r["coverUrl"].as_str()).unwrap_or(""),
+        "desc": r["desc"].as_str().or_else(|| r["description"].as_str()).unwrap_or(""),
+        "djName": dj["nickname"].as_str().unwrap_or(""),
+        "category": r["category"].as_str().or_else(|| r["categoryName"].as_str()).unwrap_or(""),
+        "programCount": r["programCount"].as_i64().unwrap_or(0),
+        "subCount": r["subCount"].as_i64().unwrap_or(0),
+    })
+}
+
+fn dedup_songs(songs: Vec<Value>) -> Vec<Value> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for song in songs {
+        let key = value_as_string(&song["id"]).unwrap_or_default();
+        let name = song["name"].as_str().unwrap_or("");
+        let artist = song["artist"].as_str().unwrap_or("");
+        let dedup_key = if !key.is_empty() { key } else { format!("{}|{}", name, artist) };
+        if dedup_key.is_empty() || seen.insert(dedup_key) {
+            out.push(song);
+        }
+    }
+    out
+}
+
+fn is_low_signal_song(song: &Value) -> bool {
+    let name = song["name"].as_str().unwrap_or("").to_lowercase();
+    let artist = song["artist"].as_str().unwrap_or("").to_lowercase();
+    let album = song["album"].as_str().unwrap_or("").to_lowercase();
+    let text = format!("{} {} {}", name, artist, album);
+    if text.is_empty() { return true; }
+    if text.contains("ai") && (text.contains("歌") || text.contains("cover") || text.contains("翻唱") || text.contains("生成")) { return true; }
+    if text.contains("suno") || text.contains("udio") || text.contains("人工智能") { return true; }
+    if text.contains("翻唱") || text.contains("cover") || text.contains("remix") || text.contains("伴奏") || text.contains("纯音乐") { return true; }
+    if text.contains("白噪音") || text.contains("雨声") || text.contains("睡眠") || text.contains("助眠") || text.contains("asmr") { return true; }
+    false
 }
 
 fn compare_versions(a: &str, b: &str) -> i32 {

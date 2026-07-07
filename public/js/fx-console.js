@@ -2683,9 +2683,7 @@ function updateProgressDetailText() {
 }
 function initUpdatePreview() {
   renderUpdatePreviewPanel();
-  setUpdatePreviewVisible(true);
   checkLatestUpdate();
-  setTimeout(startUpdateIconBreathing, 760);
 }
 
 function setUpdatePreviewVisible(visible) {
@@ -2716,11 +2714,10 @@ async function checkLatestUpdate() {
     }
     applyLatestUpdateInfo(data);
   } catch (e) {
-    updatePreviewState.preview = true;
+    updatePreviewState.preview = false;
     updatePreviewState.updateAvailable = false;
     updatePreviewState.hero = '当前版本，更新检测已就绪。';
     renderUpdatePreviewPanel();
-    setUpdatePreviewVisible(true);
   }
 }
 
@@ -2742,7 +2739,8 @@ function applyLatestUpdateInfo(data) {
     updatePreviewState.notes = release.notes.slice(0, 4);
   }
   renderUpdatePreviewPanel();
-  setUpdatePreviewVisible(updatePreviewState.updateAvailable || updatePreviewState.preview);
+  setUpdatePreviewVisible(updatePreviewState.updateAvailable);
+  if (updatePreviewState.updateAvailable) setTimeout(startUpdateIconBreathing, 760);
 }
 
 function startUpdateIconBreathing() {

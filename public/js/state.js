@@ -77,7 +77,7 @@ var localBeatMapCache = readLocalBeatMapCache();
 var localBeatMapPrefs = readLocalBeatPrefs();
 var playbackQuality = readPlaybackQualityPreference();
 var qqPlaybackQualityCeiling = '';
-var controlsAutoHide = readBooleanPreference(CONTROLS_AUTO_HIDE_STORE_KEY, false);
+var controlsAutoHide = readBooleanPreference(CONTROLS_AUTO_HIDE_STORE_KEY, true);
 var playlistPanelPinned = readBooleanPreference(PLAYLIST_PANEL_PIN_STORE_KEY, false);
 var coverCropState = null, coverCropBound = false;
 var currentLocalSong = null;
@@ -248,7 +248,7 @@ function applyUserCapsuleAutoHideState() {
   var btn = document.getElementById('user-capsule-hide-btn');
   if (btn) {
     btn.classList.toggle('on', !!userCapsuleAutoHide);
-    btn.textContent = userCapsuleAutoHide ? '›' : '‹';
+    btn.textContent = userCapsuleAutoHide ? '‹' : '›';
     btn.title = userCapsuleAutoHide ? '取消自动隐藏账号胶囊' : '自动隐藏账号胶囊';
   }
 }
@@ -280,7 +280,7 @@ function applyFxFabAutoHideState(opts) {
   var btn = document.getElementById('fx-fab-hide-btn');
   if (btn) {
     btn.classList.toggle('on', !!fxFabAutoHide);
-    btn.textContent = fxFabAutoHide ? '›' : '‹';
+    btn.textContent = fxFabAutoHide ? '‹' : '›';
     btn.title = fxFabAutoHide ? '取消自动隐藏视觉控制台' : '自动隐藏视觉控制台';
   }
 }

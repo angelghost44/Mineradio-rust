@@ -971,6 +971,10 @@ document.addEventListener('DOMContentLoaded', function(){
   markAppPerf('dom-content-loaded');
   armSplashSoundFallback();
   prewarmHomeWallpaperPreview();
+  // 预加载天气电台数据，开屏期间就开始获取封面，进入主页即可立即显示
+  if (typeof loadHomeWeatherRadio === 'function' && !homeWeatherRadioState.loaded && !homeWeatherRadioState.loading) {
+    loadHomeWeatherRadio(false).catch(function(e){ console.warn('weather radio preload failed:', e); });
+  }
   function requestSplashEnter() {
     playMineradioIntroSound();
     if (splashReadyToEnter) dismissSplash();

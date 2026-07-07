@@ -1513,7 +1513,7 @@ async function togglePlay() {
       safePlaybackStep('listen-stats-pause', function(){ updateListenStatsTick(true); });
       forcePlaybackControlsInteractive();
       safePlaybackStep('sync-pause-state', function(){ syncPlaybackStateFromAudioEvent('manual-pause'); });
-      safePlaybackStep('pause-controls-hide', function(){ scheduleControlsHide(520); });
+      safePlaybackStep('pause-controls-hide', function(){ scheduleControlsHide(2000); });
     }
   } catch (err) {
     console.warn('[TogglePlay]', err);
@@ -2168,7 +2168,7 @@ function setMiniQueueOpen(open) {
       if (seq !== miniQueueRenderSeq || !miniQueueOpen) return;
       renderMiniQueuePanel({ animate: true, scrollCurrent: true });
     });
-    revealBottomControls(1300);
+    revealBottomControls(2000);
   }
 }
 function toggleMiniQueue(e) {

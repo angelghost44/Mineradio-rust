@@ -197,6 +197,7 @@ pub fn run() {
                     ));
                 }
                 let _ = window.set_background_color(Some(tauri::window::Color(8, 9, 11, 255)));
+                let _ = window.show();
             }
 
             Ok(())
