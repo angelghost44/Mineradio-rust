@@ -2082,13 +2082,14 @@ function resetHotkeyBinding(action, scope) {
   setHotkeyBinding(action, scope, scope === 'global' ? meta.global : meta.local);
 }
 function registerGlobalHotkeys() {
-  var api = getDesktopWindowApi && getDesktopWindowApi();
-  if (!api || typeof api.configureGlobalHotkeys !== 'function') {
-    hotkeyGlobalStatus = {};
-    renderHotkeySettings();
-    return Promise.resolve();
-  }
-  var duplicate = hotkeyDuplicateMap('global');
+var api = getDesktopWindowApi && getDesktopWindowApi();
+if (!api || typeof api.configureGlobalHotkeys !== 'function') {
+hotkeyGlobalStatus = {};
+renderHotkeySettings();
+return Promise.resolve();
+}
+if (!hotkeySettings) hotkeySettings = readHotkeySettings();
+var duplicate = hotkeyDuplicateMap('global');
   var bindings = [];
   HOTKEY_ACTIONS.forEach(function(action){
     var key = hotkeySettings.global && hotkeySettings.global[action.key];

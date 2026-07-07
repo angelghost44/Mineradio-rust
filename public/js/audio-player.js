@@ -1336,7 +1336,8 @@ async function playQueueAt(idx, opts) {
     }
     bindPlaybackProgressEvents(audio);
     applyVolumeToAudio();
-    var proxyAudioUrl = '/api/audio?url=' + encodeURIComponent(data.url);
+    var isTauri = (typeof MR !== 'undefined' && MR.invoke);
+    var proxyAudioUrl = isTauri ? data.url : '/api/audio?url=' + encodeURIComponent(data.url);
     audio.src = proxyAudioUrl;
     updatePlaybackProgressUi();
     audio.onended = function(){
@@ -1568,12 +1569,52 @@ function clearQueue() {
 function removeFromQueue(idx) {
   if (idx < 0 || idx >= playQueue.length) return;
   playQueue.splice(idx, 1);
+  if (currentIdx === idx) currentIdx = -1;
+  else if (currentIdx > idx) currentIdx--;
   if (currentIdx >= playQueue.length) currentIdx = playQueue.length - 1;
   safeRenderQueuePanel('remove-queue-item');
   safeShelfRebuild('remove-queue-item');
   updateCustomCoverButton();
   updateCustomLyricControls();
   updateEmptyHomeVisibility({ forceLoad: false });
+}
+// ---- Queue drag-and-drop reorder ----
+var _queueDragFromIdx = -1;
+function queueDragStart(e, idx) {
+  _queueDragFromIdx = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', String(idx));
+  e.currentTarget.classList.add('qi-dragging');
+}
+function queueDragOver(e, idx) {
+  if (_queueDragFromIdx < 0 || _queueDragFromIdx === idx) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('qi-drag-over');
+}
+function queueDragLeave(e) {
+  e.currentTarget.classList.remove('qi-drag-over');
+}
+function queueDrop(e, toIdx) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.classList.remove('qi-drag-over');
+  var fromIdx = _queueDragFromIdx;
+  _queueDragFromIdx = -1;
+  if (fromIdx < 0 || fromIdx === toIdx || fromIdx >= playQueue.length || toIdx >= playQueue.length) return;
+  var item = playQueue.splice(fromIdx, 1)[0];
+  playQueue.splice(toIdx, 0, item);
+  // Adjust currentIdx
+  if (currentIdx === fromIdx) currentIdx = toIdx;
+  else if (currentIdx > fromIdx && currentIdx <= toIdx) currentIdx--;
+  else if (currentIdx < fromIdx && currentIdx >= toIdx) currentIdx++;
+  safeRenderQueuePanel('queue-reorder');
+  safeShelfRebuild('queue-reorder');
+}
+function queueDragEnd(e) {
+  _queueDragFromIdx = -1;
+  e.currentTarget.classList.remove('qi-dragging');
+  document.querySelectorAll('.queue-item.qi-drag-over').forEach(function(el){ el.classList.remove('qi-drag-over'); });
 }
 function playModeLabel(mode) {
   return { loop: '顺序循环', shuffle: '随机播放', single: '单曲循环' }[mode] || '顺序循环';
@@ -2250,7 +2291,8 @@ function renderQueuePanel(opts) {
   $ql.innerHTML = playQueue.map(function(song, i){
     var thumb = songCoverSrc(song, 60);
     var imgTag = thumb ? '<img src="' + thumb + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:38px;height:38px;border-radius:6px;background:rgba(255,255,255,.06);flex-shrink:0"></div>';
-    return '<div class="queue-item' + (i === currentIdx ? ' now' : '') + '" onclick="playQueueAt(' + i + ')">' +
+    return '<div class="queue-item' + (i === currentIdx ? ' now' : '') + '" data-qi="' + i + '" draggable="true" onclick="playQueueAt(' + i + ')" ondragstart="queueDragStart(event,' + i + ')" ondragover="queueDragOver(event,' + i + ')" ondragleave="queueDragLeave(event)" ondrop="queueDrop(event,' + i + ')" ondragend="queueDragEnd(event)">' +
+      '<span class="qi-num">' + (i + 1) + '</span>' +
       imgTag +
       '<div class="qi-info"><div class="qi-name">' + escHtml(song.name) + '</div><div class="qi-sub"><button class="queue-artist-link" type="button" onclick="event.stopPropagation();openQueueArtist(' + i + ')">' + escHtml(song.artist || '未知歌手') + '</button></div></div>' +
       '<div class="qi-act">' +

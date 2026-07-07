@@ -163,6 +163,28 @@ window.MR = window.MR || {};
 
     clearQQMusicLogin: function () {
       return tauri.core.invoke('clear_qq_music_login');
+    },
+
+    // ---- Global hotkeys ----
+
+    configureGlobalHotkeys: function (bindings) {
+      return tauri.core.invoke('configure_global_hotkeys', { bindings: bindings || [] });
+    },
+
+    onGlobalHotkey: function (cb) {
+      return tauri.event.listen('mineradio-global-hotkey', function (e) {
+        cb(e.payload);
+      });
+    },
+
+    // ---- JSON import / export ----
+
+    exportJsonFile: function (payload) {
+      return tauri.core.invoke('export_json_file', payload || {});
+    },
+
+    importJsonFile: function () {
+      return tauri.core.invoke('import_json_file');
     }
   };
 })();

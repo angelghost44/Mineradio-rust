@@ -221,7 +221,7 @@ body.home-controls-locked #bottom-bar{opacity:0!important;pointer-events:none!im
 .ctrl-btn{flex:0 0 auto;width:36px;height:36px;background:transparent;border:0;border-radius:11px;color:rgba(255,255,255,0.70);cursor:pointer;transition:color .18s,transform .18s,text-shadow .18s,background .18s,box-shadow .18s;display:flex;align-items:center;justify-content:center;padding:0;will-change:transform}
 .ctrl-btn:focus{outline:none}
 .ctrl-btn:focus-visible{outline:1px solid rgba(var(--fc-accent-rgb),.34);outline-offset:2px}
-.ctrl-btn svg{width:21px;height:21px}
+.ctrl-btn svg{width:21px;height:21px;display:block;flex-shrink:0}
 .ctrl-btn:hover{color:#fff;background:rgba(255,255,255,.045);transform:translateY(-1px);text-shadow:0 0 10px rgba(var(--fc-accent-rgb),.12);box-shadow:inset 0 1px 0 rgba(255,255,255,.045)}
 .ctrl-btn:active{transform:translateY(0) scale(.96)}
 .ctrl-btn.active{color:rgba(210,244,241,.90);text-shadow:0 0 12px rgba(var(--fc-accent-rgb),.16)}

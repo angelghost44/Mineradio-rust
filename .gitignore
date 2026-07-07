@@ -32,6 +32,7 @@ qq_qr*.png
 qq_c*.txt
 qq_cookies*.txt
 sidecar/.cookie
+sidecar/beatmaps/
 *_test.py
 *_test2.py
 *_test3.py

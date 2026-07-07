@@ -276,6 +276,7 @@ impl OnlineApiState {
             "comment_music" => self.comment_music(&params, &cookie).await,
 
             // ---- podcast ----
+            "podcast_search" => self.podcast_search(&params, &cookie).await,
             "dj_hot" => self.dj_hot(&params, &cookie).await,
             "dj_program" => self.dj_program(&params, &cookie).await,
             "dj_detail" => self.dj_detail(&params, &cookie).await,
@@ -283,6 +284,13 @@ impl OnlineApiState {
             "user_audio" => self.user_audio(&params, &cookie).await,
             "record_recent_voice" => self.record_recent_voice(&params, &cookie).await,
             "sati_resource_sub_list" => self.sati_resource_sub_list(&cookie).await,
+            "dj_beatmap" => self.dj_beatmap(&params).await,
+
+            // ---- beatmap cache ----
+            "beatmap_cache_status" => self.beatmap_cache_status().await,
+            "beatmap_cache" => self.beatmap_cache(&params).await,
+            "beatmap_cache_get" => self.beatmap_cache_get(&params).await,
+            "beatmap_cache_set" => self.beatmap_cache_set(&params).await,
 
             // ---- qq music ----
             "qq_search" => self.qq_search(&params).await,
@@ -844,9 +852,43 @@ impl OnlineApiState {
         }))
     }
 
-    // ---- podcast ----
+// ---- podcast ----
 
-    async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
+async fn podcast_search(&self, params: &Value, cookie: &str) -> Result<Value, String> {
+    let keywords = params["keywords"].as_str().unwrap_or("").trim();
+    if keywords.is_empty() {
+        return Ok(json!({ "podcasts": [] }));
+    }
+    let limit = params["limit"].as_i64()
+        .or_else(|| params["limit"].as_str().and_then(|s| s.parse().ok()))
+        .unwrap_or(18)
+        .clamp(6, 30);
+    let data = json!({
+        "s": keywords,
+        "type": 1009,
+        "limit": limit,
+        "offset": 0,
+        "total": true,
+    });
+    let res = self.eapi_request("/api/cloudsearch/pc", data, cookie).await?;
+    let result = &res["body"]["result"];
+    let raw = result["djRadios"]
+        .as_array()
+        .or_else(|| result["djradios"].as_array())
+        .or_else(|| result["radios"].as_array())
+        .cloned()
+        .unwrap_or_default();
+    let podcasts: Vec<Value> = raw.iter().map(|r| map_podcast_radio(r)).filter(|p| {
+        let id = value_as_string(&p["id"]).unwrap_or_default();
+        !id.is_empty() && id != "0"
+    }).collect();
+    let total = result["djRadiosCount"].as_i64()
+        .or_else(|| result["djradiosCount"].as_i64())
+        .unwrap_or(podcasts.len() as i64);
+    Ok(json!({ "podcasts": podcasts, "total": total }))
+}
+
+async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
         let limit = params["limit"].as_i64().unwrap_or(18);
         let offset = params["offset"].as_i64().unwrap_or(0);
         let data = json!({"limit": limit, "offset": offset});
@@ -900,6 +942,135 @@ impl OnlineApiState {
             .eapi_request("/api/voice/sati/resource/sub/list", json!({}), cookie)
             .await?;
         Ok(json!({"data": res["body"]["data"]}))
+    }
+
+    // ── DJ beatmap (simplified: delegates to frontend analysis) ────────
+
+    /// Returns a not-supported response so the frontend falls back to its
+    /// own Web Audio API based analysis. The original Electron version
+    /// downloaded and decoded MP3 audio server-side using mpg123-decoder;
+    /// in the Rust port we simplify to frontend analysis per the migration plan.
+    async fn dj_beatmap(&self, _params: &Value) -> Result<Value, String> {
+        Ok(json!({ "ok": false, "error": "NOT_SUPPORTED_FRONTEND_FALLBACK" }))
+    }
+
+    // ── Beatmap disk cache ─────────────────────────────────────────────
+
+    fn beatmap_cache_dir(&self) -> PathBuf {
+        self.cookie_dir.join("beatmaps")
+    }
+
+    fn beatmap_cache_file(&self, key: &str) -> Option<PathBuf> {
+        let raw = key.trim();
+        if raw.is_empty() || raw.len() > 240 {
+            return None;
+        }
+        let digest = md5::compute(raw.as_bytes());
+        let hash = format!("{:x}", digest);
+        let label: String = raw
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+            .collect::<String>()
+            .trim_matches('_')
+            .chars()
+            .take(48)
+            .collect();
+        let label = if label.is_empty() { "beatmap" } else { &label };
+        Some(self.beatmap_cache_dir().join(format!("{}-{}.json", label, hash)))
+    }
+
+    async fn beatmap_cache_status(&self) -> Result<Value, String> {
+        let dir = self.beatmap_cache_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        Ok(json!({
+            "enabled": true,
+            "dir": dir.to_string_lossy(),
+            "mode": "disk",
+            "reason": "",
+        }))
+    }
+
+    /// Dispatcher for `/api/beatmap/cache` — routes to GET (read) or POST (write)
+    /// based on whether a `map` field is present in params.
+    async fn beatmap_cache(&self, params: &Value) -> Result<Value, String> {
+        if params.get("map").is_some() && !params["map"].is_null() {
+            self.beatmap_cache_set(params).await
+        } else {
+            self.beatmap_cache_get(params).await
+        }
+    }
+
+    async fn beatmap_cache_get(&self, params: &Value) -> Result<Value, String> {
+        let key = params["key"].as_str().unwrap_or("").to_string();
+        let file = match self.beatmap_cache_file(&key) {
+            Some(f) => f,
+            None => return Ok(json!({ "ok": true, "hit": false, "key": key })),
+        };
+        if !file.exists() {
+            return Ok(json!({ "ok": true, "hit": false, "key": key }));
+        }
+        let raw = std::fs::read_to_string(&file)
+            .map_err(|e| format!("BEAT_CACHE_READ_FAILED: {}", e))?;
+        let entry: Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("BEAT_CACHE_PARSE_FAILED: {}", e))?;
+        if entry["map"].is_null() {
+            return Ok(json!({ "ok": true, "hit": false, "key": key }));
+        }
+        Ok(json!({
+            "ok": true,
+            "hit": true,
+            "key": entry["key"].as_str().unwrap_or(&key),
+            "map": entry["map"],
+            "meta": entry.get("meta").cloned().unwrap_or(json!({})),
+            "savedAt": entry["savedAt"].as_i64().unwrap_or(0),
+        }))
+    }
+
+    async fn beatmap_cache_set(&self, params: &Value) -> Result<Value, String> {
+        let key = params["key"].as_str().unwrap_or("").trim().to_string();
+        let map = &params["map"];
+        if key.is_empty() || map.is_null() {
+            return Ok(json!({ "ok": false, "error": "INVALID_BEATMAP_CACHE_PAYLOAD" }));
+        }
+        let file = match self.beatmap_cache_file(&key) {
+            Some(f) => f,
+            None => return Ok(json!({ "ok": false, "error": "INVALID_BEATMAP_CACHE_KEY" })),
+        };
+        let dir = self.beatmap_cache_dir();
+        let _ = std::fs::create_dir_all(&dir);
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+
+        let payload = json!({
+            "v": 1,
+            "key": key,
+            "savedAt": now,
+            "meta": {
+                "provider": params.get("provider").and_then(|v| v.as_str()).unwrap_or(""),
+                "title": params.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                "artist": params.get("artist").and_then(|v| v.as_str()).unwrap_or(""),
+                "mode": params.get("mode").and_then(|v| v.as_str()).unwrap_or("mr"),
+            },
+            "map": map,
+        });
+
+        let tmp = file.with_extension("json.tmp");
+        let json_str = serde_json::to_string(&payload)
+            .map_err(|e| format!("BEAT_CACHE_SERIALIZE_FAILED: {}", e))?;
+        std::fs::write(&tmp, json_str)
+            .map_err(|e| format!("BEAT_CACHE_WRITE_FAILED: {}", e))?;
+        std::fs::rename(&tmp, &file)
+            .map_err(|e| format!("BEAT_CACHE_RENAME_FAILED: {}", e))?;
+
+        Ok(json!({
+            "ok": true,
+            "key": key,
+            "savedAt": now,
+            "dir": dir.to_string_lossy(),
+        }))
     }
 
     // ── QQ Music API methods ───────────────────────────────────────────

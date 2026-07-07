@@ -232,7 +232,13 @@ body.empty-home-active .home-visual{animation:home-visual-drift 8.8s ease-in-out
 .home-tile-cover{position:relative;width:100%;height:92px;border-radius:15px;background:linear-gradient(135deg,color-mix(in srgb,var(--tone-a) 74%,#16161b),color-mix(in srgb,var(--tone-b) 58%,#08090d));background-size:cover;background-position:center;box-shadow:0 14px 34px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.14);margin-bottom:10px;overflow:hidden}
 .home-tile-cover:not(.has-cover)::before{content:'';position:absolute;left:12px;bottom:12px;width:54px;height:54px;border-radius:50%;background:repeating-radial-gradient(circle,rgba(255,255,255,.14) 0 1px,transparent 1px 7px),conic-gradient(from 180deg,var(--tone-a),var(--tone-b),var(--tone-c),var(--tone-a));box-shadow:inset 0 0 0 10px rgba(5,5,8,.42)}
 .home-tile-cover:not(.has-cover)::after{content:'';position:absolute;right:12px;top:14px;width:46px;height:48px;border-radius:999px;background:repeating-linear-gradient(0deg,rgba(255,255,255,.72) 0 3px,transparent 3px 9px);opacity:.32}
-.home-tile-title{font-size:12px;font-weight:720;color:rgba(255,255,255,.90);line-height:1.28;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.home-tile-title{font-size:12px;font-weight:720;color:rgba(255,255,255,.90);line-height:1.28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-tile-title.marquee{text-overflow:clip}
+.home-tile-title-text{display:inline-block;white-space:nowrap}
+.home-tile-title.marquee .home-tile-title-text::after{content:attr(data-text);padding-left:24px}
+.home-tile-title.marquee .home-tile-title-text{animation:home-tile-marquee 8s linear infinite}
+.home-tile:hover .home-tile-title.marquee .home-tile-title-text{animation-play-state:paused}
+@keyframes home-tile-marquee{0%{transform:translateX(0)}100%{transform:translateX(calc(-50% - 12px))}}
 .home-tile-sub{display:none;font-size:10.5px;color:rgba(255,255,255,.42);margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .home-skeleton{position:relative;overflow:hidden}
 .home-skeleton::before{content:'';position:absolute;inset:0;background:linear-gradient(110deg,transparent,rgba(255,255,255,.08),transparent);transform:translateX(-100%);animation:home-shimmer 1.5s ease-in-out infinite}

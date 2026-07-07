@@ -260,13 +260,21 @@ function renderUserBtn() {
   }
   updatePlaybackQualityUi();
 }
+var _loginModalOpening = false;
 async function showLoginModal(opts) {
   opts = opts || {};
-  if (opts.provider) loginProvider = opts.provider === 'qq' ? 'qq' : 'netease';
   var modal = document.getElementById('login-modal');
-  openGsapModal(modal);
-  updateLoginProviderUi();
-  await refreshQr();
+  if (modal && modal.classList.contains('show')) return;
+  if (_loginModalOpening) return;
+  _loginModalOpening = true;
+  try {
+    if (opts.provider) loginProvider = opts.provider === 'qq' ? 'qq' : 'netease';
+    openGsapModal(modal);
+    updateLoginProviderUi();
+    await refreshQr();
+  } finally {
+    _loginModalOpening = false;
+  }
 }
 function closeLoginModal() {
   stopQrPoll();

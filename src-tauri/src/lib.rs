@@ -4,6 +4,7 @@ use tauri::Manager;
 
 mod commands;
 mod extractor;
+mod hotkeys;
 mod login;
 mod lyrics;
 mod online_api;
@@ -156,6 +157,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::scan_folder,
             commands::extract_cover,
@@ -175,6 +177,9 @@ pub fn run() {
             crate::login::clear_netease_music_login,
             crate::login::clear_qq_music_login,
             commands::pick_folder,
+            commands::export_json_file,
+            commands::import_json_file,
+            hotkeys::configure_global_hotkeys,
         ])
         .setup(|app| {
             let cookie_dir = resolve_cookie_dir();

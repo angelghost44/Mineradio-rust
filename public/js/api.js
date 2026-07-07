@@ -77,14 +77,16 @@ function tauriRouteToMethod(pn) {
     '/api/weather/ip-location':'weather_ip_location','/api/weather/radio':'weather_radio',
     '/api/artist/detail':'artist_detail','/api/artist/top/song':'artist_top_song','/api/artist/songs':'artist_songs',
     '/api/comment/music':'comment_music',
-    '/api/podcast/hot':'dj_hot','/api/podcast/programs':'dj_program','/api/podcast/detail':'dj_detail',
+    '/api/podcast/search':'podcast_search','/api/podcast/hot':'dj_hot','/api/podcast/programs':'dj_program','/api/podcast/detail':'dj_detail',
     '/api/podcast/my':'dj_sublist','/api/podcast/my/items':'user_audio','/api/podcast/voice/recent':'record_recent_voice',
+    '/api/podcast/dj-beatmap':'dj_beatmap','/api/beatmap/cache':'beatmap_cache','/api/beatmap/cache/status':'beatmap_cache_status',
     '/api/qq/search':'qq_search','/api/qq/song/url':'qq_song_url','/api/qq/lyric':'qq_lyric',
     '/api/qq/user/playlists':'qq_user_playlists','/api/qq/playlist/tracks':'qq_playlist_tracks',
     '/api/qq/login/cookie':'qq_login_cookie','/api/qq/login/status':'qq_login_status','/api/qq/logout':'qq_logout',
     '/api/qq/login/qr/key':'qq_qr_key','/api/qq/login/qr/create':'qq_qr_create','/api/qq/login/qr/check':'qq_qr_check',
     '/api/qq/artist/detail':'qq_artist_detail','/api/qq/song/comments':'qq_song_comments',
     '/api/song/comments':'comment_music',
+    '/api/cover':'cover',
   };
   return map[pn] || null;
 }
@@ -273,6 +275,36 @@ function coverUrlWithSize(url, size) {
   if (/[?&]param=\d+y\d+/i.test(url)) return url.replace(/([?&])param=\d+y\d+/i, '$1' + param);
   return url + (url.indexOf('?') >= 0 ? '&' : '?') + param;
 }
+// Shared helper: load a cover Image with Tauri/non-Tauri support.
+// Handles data: URLs (direct), Tauri mode (backend proxy → data URL), and non-Tauri (coverProxySrc).
+function loadCoverImage(url, onLoad, onError) {
+  if (!url) { if (onError) onError(); return; }
+  if (isInlineCoverSrc(url)) {
+    var img0 = new Image();
+    img0.onload = function() { if (onLoad) onLoad(img0); };
+    img0.onerror = function() { if (onError) onError(); };
+    img0.src = url;
+    return;
+  }
+  if (typeof MR !== 'undefined' && MR.invoke) {
+    apiJson('/api/cover?url=' + encodeURIComponent(url)).then(function(result) {
+      var dataUrl = result && result.data;
+      if (!dataUrl) { if (onError) onError(); return; }
+      var img = new Image();
+      img.onload = function() { if (onLoad) onLoad(img); };
+      img.onerror = function() { if (onError) onError(); };
+      img.src = dataUrl;
+    }).catch(function() { if (onError) onError(); });
+    return;
+  }
+  var src = coverProxySrc(url);
+  if (!src) { if (onError) onError(); return; }
+  var img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = function() { if (onLoad) onLoad(img); };
+  img.onerror = function() { if (onError) onError(); };
+  img.src = src;
+}
 function songCustomCoverKey(song) {
   if (!song) return '';
   if (song.customCoverKey) return String(song.customCoverKey);
@@ -350,10 +382,12 @@ function listenSongSnapshot(song) {
     sourceKey: song.source || song.provider || '',
     name: song.name || song.title || '未知歌曲',
     artist: song.artist || '',
-    cover: songCoverSrc(song, 220) || song.cover || '',
+    cover: song.cover || '',
     source: songSourceLabel(song),
     provider: song.provider || song.source || song.type || '',
     duration: Number(song.duration) || 0,
+    filePath: song.filePath || '',
+    localKey: song.localKey || '',
   };
 }
 function beginListenSession(song, context) {
@@ -543,14 +577,24 @@ function renderHomeTiles() {
     var cover = homeTileCover(item);
     var tone = homeToneForItem(item, i);
     var coverClass = 'home-tile-cover' + (cover ? ' has-cover' : '');
+    var title = escHtml(item.title || '');
     return '<button class="home-tile' + (!cover && homeDiscoverState.loading ? ' home-skeleton' : '') + '" data-home-tone="' + escHtml(tone) + '" type="button" onclick="handleHomeTileClick(' + i + ')">' +
       '<div class="' + coverClass + '" style="' + (cover ? 'background-image:url(&quot;' + escHtml(cssImageUrl(cover)) + '&quot;)' : '') + '"></div>' +
-      '<div class="home-tile-title">' + escHtml(item.title || '') + '</div>' +
+      '<div class="home-tile-title"><span class="home-tile-title-text" data-text="' + title + '">' + title + '</span></div>' +
       '<div class="home-tile-sub">' + escHtml(item.sub || '') + '</div>' +
     '</button>';
   }).join('');
   row._homeTiles = tiles;
   renderHomeMosaic(tiles);
+  // Enable marquee scroll for overflowed tile titles
+  requestAnimationFrame(function(){
+    row.querySelectorAll('.home-tile-title').forEach(function(el){
+      var text = el.querySelector('.home-tile-title-text');
+      if (!text) return;
+      if (text.scrollWidth > el.offsetWidth + 2) el.classList.add('marquee');
+      else el.classList.remove('marquee');
+    });
+  });
 }
 function renderHomeDiscover() {
   var sub = document.getElementById('home-subtitle');
@@ -1162,11 +1206,21 @@ function queueLocalMusicIndex(idx) {
     size: file.size || 0,
     duration: 0,
   });
+  // Deduplicate: skip if already in queue
+  var key = queueItemKey(song);
+  if (key) {
+    for (var j = 0; j < playQueue.length; j++) {
+      if (queueItemKey(playQueue[j]) === key) {
+        showToast('已在队列中: ' + file.name);
+        return;
+      }
+    }
+  }
   playQueue.push(song);
   safeRenderQueuePanel('queue-local-song');
   safeShelfRebuild('queue-local-song');
   showToast('已添加到队列: ' + file.name);
-  // Load cover asynchronously
+  // Load cover asynchronously — use closure reference to song, not index
   apiJson('/api/local/cover?path=' + encodeURIComponent(file.path), { _noTauri: false }).then(function(res){
     var coverUrl = (res && res.data) ? res.data : '';
     if (coverUrl) {
@@ -1178,6 +1232,14 @@ function queueLocalMusicIndex(idx) {
 function queueAllLocalMusic() {
   var files = localMusicState.files;
   if (!files || !files.length) return;
+  // Build a set of existing queue keys for O(1) dedup
+  var existingKeys = {};
+  for (var j = 0; j < playQueue.length; j++) {
+    var k = queueItemKey(playQueue[j]);
+    if (k) existingKeys[k] = true;
+  }
+  var added = 0;
+  var addedSongs = [];
   for (var i = 0; i < files.length; i++) {
     var file = files[i];
     var url = localAudioUrl(file.path);
@@ -1192,23 +1254,25 @@ function queueAllLocalMusic() {
       size: file.size || 0,
       duration: 0,
     });
+    var key = queueItemKey(song);
+    if (key && existingKeys[key]) continue; // skip duplicates
+    if (key) existingKeys[key] = true;
     playQueue.push(song);
+    addedSongs.push(song);
+    added++;
   }
   safeRenderQueuePanel('queue-all-local');
   safeShelfRebuild('queue-all-local');
-  showToast('已添加全部 ' + files.length + ' 首本地音乐到播放列表');
-  // Load covers asynchronously for visible items
-  var todo = files.length;
-  files.forEach(function(file, i){
-    apiJson('/api/local/cover?path=' + encodeURIComponent(file.path), { _noTauri: false }).then(function(res){
+  showToast(added > 0 ? '已添加 ' + added + ' 首本地音乐到播放列表' : '所有本地音乐已在队列中');
+  // Load covers asynchronously — use closure reference to each song, not playQueue index
+  addedSongs.forEach(function(song){
+    apiJson('/api/local/cover?path=' + encodeURIComponent(song.filePath), { _noTauri: false }).then(function(res){
       var coverUrl = (res && res.data) ? res.data : '';
-      if (coverUrl && playQueue[i]) {
-        playQueue[i].cover = coverUrl;
+      if (coverUrl) {
+        song.cover = coverUrl;
+        safeRenderQueuePanel('cover-ready');
       }
-      if (--todo === 0) safeRenderQueuePanel('covers-ready');
-    }).catch(function(){
-      if (--todo === 0) safeRenderQueuePanel('covers-ready');
-    });
+    }).catch(function(){});
   });
 }
 function playLocalFile(file) {
@@ -1553,9 +1617,12 @@ document.addEventListener('click', function(e) {
 }, true);
 function songFromListenRecord(record) {
   if (!record) return null;
+  var isLocal = record.type === 'local' || record.source === '本地上传';
   var provider = record.sourceKey || '';
-  if (!provider && record.type === 'qq') provider = 'qq';
-  if (!provider) provider = record.mid ? 'qq' : 'netease';
+  if (!isLocal) {
+    if (!provider && record.type === 'qq') provider = 'qq';
+    if (!provider) provider = record.mid ? 'qq' : 'netease';
+  }
   return {
     provider: provider,
     source: provider,
@@ -1567,6 +1634,8 @@ function songFromListenRecord(record) {
     name: record.name || '继续听',
     artist: record.artist || '',
     cover: record.cover || '',
+    filePath: record.filePath || '',
+    localKey: record.localKey || '',
   };
 }
 async function playHomeRecent(record) {

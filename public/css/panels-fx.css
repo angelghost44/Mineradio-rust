@@ -526,15 +526,22 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 .queue-item:hover{background:rgba(255,255,255,.05)}
 .queue-item.now{border-color:rgba(var(--fc-accent-rgb),.34);background:rgba(var(--fc-accent-rgb),.075)}
 .queue-item img{width:38px;height:38px;border-radius:6px;object-fit:cover;background:rgba(255,255,255,.06);flex-shrink:0}
-.qi-info{flex:1;min-width:0}
-.qi-name{font-size:12px;color:rgba(255,255,255,.9);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qi-num{flex-shrink:0;width:18px;text-align:right;font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;color:rgba(255,255,255,.32);user-select:none}
+.queue-item.now .qi-num{color:rgba(var(--fc-accent-rgb),.78)}
+.queue-item.qi-drag-over{border-color:rgba(var(--fc-accent-rgb),.52)!important;background:rgba(var(--fc-accent-rgb),.10)!important;box-shadow:0 0 0 1px rgba(var(--fc-accent-rgb),.30),0 8px 24px rgba(0,0,0,.18)}
+.queue-item.qi-dragging{opacity:.4}
+.qi-info{flex:1;min-width:0;overflow:hidden}
+.qi-name{font-size:12px;color:rgba(255,255,255,.9);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:0;transition:padding-right .15s}
+.queue-item:hover .qi-name{padding-right:112px}
 .queue-item.now .qi-name{color:#eafffb}
-.qi-sub{font-size:10.5px;color:rgba(255,255,255,.4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qi-sub{font-size:10.5px;color:rgba(255,255,255,.4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:padding-right .15s}
+.queue-item:hover .qi-sub{padding-right:112px}
 .queue-artist-link{max-width:100%;border:0;background:transparent;color:rgba(var(--fc-accent-rgb),.64);font:inherit;padding:0;margin:0;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .queue-artist-link:hover{color:#fff;text-decoration:underline;text-underline-offset:3px}
-.qi-act{display:flex;gap:4px;opacity:0;transition:opacity .15s}
+.qi-act{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;gap:4px;opacity:0;transition:opacity .15s;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:2px 2px;border-radius:8px}
 .queue-item:hover .qi-act{opacity:1}
-.qi-act button{width:24px;height:24px;border:none;border-radius:5px;background:rgba(255,255,255,.06);color:rgba(255,255,255,.55);cursor:pointer;font-size:13px;line-height:1}
+.queue-item{position:relative}
+.qi-act button{width:24px;height:24px;border:none;border-radius:5px;background:rgba(255,255,255,.06);color:rgba(255,255,255,.55);cursor:pointer;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0}
 .qi-act button:hover{background:rgba(255,255,255,.15);color:#fff}
 .qi-act button.queue-next:hover{background:rgba(var(--fc-accent-rgb),.14);color:#eafffb}
 .qi-act button.liked,.song-action-btn.liked{color:#ff7a90;background:rgba(255,122,144,.10)}

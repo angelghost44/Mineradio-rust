@@ -369,7 +369,8 @@ async function fetchBeatPrefetchAudioUrl(song) {
     ? await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam)
     : await apiJson('/api/song/url?id=' + encodeURIComponent(song.id) + qualityParam);
   if (!data || !data.url || data.trial) return null;
-  return '/api/audio?url=' + encodeURIComponent(data.url);
+  var isTauri = (typeof MR !== 'undefined' && MR.invoke);
+  return isTauri ? data.url : '/api/audio?url=' + encodeURIComponent(data.url);
 }
 
 function scheduleQueueBeatPrefetch(fromIdx, delayMs, state) {
@@ -1234,12 +1235,13 @@ function schedulePodcastDjAnalysis(songKey, audioUrl, token, durationSec) {
 async function analyzePodcastDjIntroBeats(audioUrl, token, durationSec) {
   if (!/^https?:\/\//i.test(audioUrl || '')) return null;
   if (token !== djBeatMapToken || !djMode.active) return null;
-  var introResp = await fetch('/api/podcast/dj-beatmap?url=' + encodeURIComponent(audioUrl) + '&duration=' + encodeURIComponent(durationSec || 0) + '&intro=180');
-  if (token !== djBeatMapToken || !djMode.active) return null;
-  var introData = await introResp.json().catch(function(){ return null; });
-  if (introResp.ok && introData && introData.ok && introData.map && introData.map.cameraBeats && introData.map.cameraBeats.length >= 4) {
-    return introData.map;
-  }
+  try {
+    var introData = await apiJson('/api/podcast/dj-beatmap?url=' + encodeURIComponent(audioUrl) + '&duration=' + encodeURIComponent(durationSec || 0) + '&intro=180');
+    if (token !== djBeatMapToken || !djMode.active) return null;
+    if (introData && introData.ok && introData.map && introData.map.cameraBeats && introData.map.cameraBeats.length >= 4) {
+      return introData.map;
+    }
+  } catch (e) { console.warn('podcast DJ intro server analysis failed:', e); }
   return null;
 }
 
@@ -1622,15 +1624,17 @@ async function analyzePodcastDjBeats(audioUrl, token, durationSec) {
     var preferServerAnalysis = /^https?:\/\//i.test(audioUrl || '') && (durationSec <= 0 || durationSec > 3300);
     if (preferServerAnalysis) {
       showBeatChip('DJ 长播客后端锁拍...');
-      var serverResp = await fetch('/api/podcast/dj-beatmap?url=' + encodeURIComponent(audioUrl) + '&duration=' + encodeURIComponent(durationSec));
-      if (token !== djBeatMapToken || !djMode.active) { hideBeatChip(); return null; }
-      var serverData = await serverResp.json().catch(function(){ return null; });
-      if (serverResp.ok && serverData && serverData.ok && serverData.map) return serverData.map;
-      console.warn('podcast DJ server analysis failed:', serverData && serverData.error);
+      try {
+        var serverData = await apiJson('/api/podcast/dj-beatmap?url=' + encodeURIComponent(audioUrl) + '&duration=' + encodeURIComponent(durationSec));
+        if (token !== djBeatMapToken || !djMode.active) { hideBeatChip(); return null; }
+        if (serverData && serverData.ok && serverData.map) return serverData.map;
+        console.warn('podcast DJ server analysis failed:', serverData && serverData.error);
+      } catch (e) { console.warn('podcast DJ server analysis failed:', e); }
       hideBeatChip();
       if (durationSec <= 0 || durationSec > 3300) return null;
     }
-    var fetchAudioUrl = /^https?:\/\//i.test(audioUrl || '') ? ('/api/audio?url=' + encodeURIComponent(audioUrl)) : audioUrl;
+    var isTauri = (typeof MR !== 'undefined' && MR.invoke);
+    var fetchAudioUrl = isTauri && /^https?:\/\//i.test(audioUrl || '') ? audioUrl : (/^https?:\/\//i.test(audioUrl || '') ? ('/api/audio?url=' + encodeURIComponent(audioUrl)) : audioUrl);
     var resp = await fetch(fetchAudioUrl);
     if (token !== djBeatMapToken || !djMode.active) { hideBeatChip(); return null; }
     var ab = await resp.arrayBuffer();
@@ -2525,42 +2529,21 @@ function loadCoverFromUrl(directUrl, opts) {
   }
   document.getElementById('album-bg').style.backgroundImage = "url(" + directUrl + ")";
   document.getElementById('album-bg').classList.add('visible');
-  var proxiedUrl = coverProxySrc(directUrl);
-  if (!proxiedUrl) {
-    uniforms.uHasCover.value = 0; setCoverDepthState(0, 0, 1);
-    resetFloatColorsToIdle();
-    setControlCoverSrc('');
-    return;
-  }
-  var img = new Image(); img.crossOrigin = 'anonymous'; img.decoding = 'async';
-  img.onload = function() {
+  loadCoverImage(directUrl, function(img) {
     if (!coverApplyStillCurrent(opts)) return;
     var size = coverTextureSizeForResolution(fx.coverResolution);
     var cv = document.createElement('canvas'); cv.width = cv.height = size;
     var cx = cv.getContext('2d');
     var iw = img.naturalWidth, ih = img.naturalHeight, s = Math.min(iw, ih);
     cx.drawImage(img, (iw-s)/2, (ih-s)/2, s, s, 0, 0, size, size);
-    applyCoverCanvas(cv, proxiedUrl || directUrl, Object.assign({}, opts, { coverKey: directUrl || proxiedUrl || '', coverSourceKind: 'url', coverSource: directUrl }));
-  };
-  img.onerror = function() {
-    var img2 = new Image(); img2.crossOrigin = 'anonymous'; img2.decoding = 'async';
-    img2.onload = function() {
-      if (!coverApplyStillCurrent(opts)) return;
-      var size = coverTextureSizeForResolution(fx.coverResolution);
-      var cv = document.createElement('canvas'); cv.width = cv.height = size;
-      cv.getContext('2d').drawImage(img2, 0, 0, size, size);
-      applyCoverCanvas(cv, directUrl, Object.assign({}, opts, { coverKey: directUrl || '', coverSourceKind: 'url', coverSource: directUrl }));
-    };
-    img2.onerror = function() {
-      if (!coverApplyStillCurrent(opts)) return;
-      currentCoverSource = null;
-      uniforms.uHasCover.value = 0; setCoverDepthState(0, 0, 1);
-      resetFloatColorsToIdle();
-      setControlCoverSrc('');
-    };
-    img2.src = directUrl;
-  };
-  img.src = proxiedUrl;
+    applyCoverCanvas(cv, directUrl, Object.assign({}, opts, { coverKey: directUrl, coverSourceKind: 'url', coverSource: directUrl }));
+  }, function() {
+    if (!coverApplyStillCurrent(opts)) return;
+    currentCoverSource = null;
+    uniforms.uHasCover.value = 0; setCoverDepthState(0, 0, 1);
+    resetFloatColorsToIdle();
+    setControlCoverSrc('');
+  });
 }
 
 function setAlbumBackground(src) {
