@@ -557,13 +557,15 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 .pl-name{font-size:12px;color:rgba(255,255,255,.9);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pl-sub{font-size:10.5px;color:rgba(255,255,255,.42);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pl-section-label{margin:14px 2px 7px;font-size:10px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:rgba(var(--fc-accent-rgb),.50)}
-.pl-inline-detail{position:relative;margin:-2px 0 12px;padding:0 4px;scroll-margin-top:16px;overflow:hidden;border-radius:12px;animation:pl-detail-expand .26s ease-out}
-@keyframes pl-detail-expand{0%{max-height:0;opacity:0}100%{max-height:2000px;opacity:1}}
+.pl-inline-detail{position:relative;margin:-2px 0 12px;padding:0 4px;scroll-margin-top:16px;overflow:hidden;border-radius:12px;transform-origin:top center;animation:pl-detail-spring .52s cubic-bezier(.22,1.2,.36,1)}
+@keyframes pl-detail-spring{0%{opacity:0;transform:translateY(-12px) scaleY(.94)}55%{opacity:1;transform:translateY(4px) scaleY(1.02)}78%{transform:translateY(-2px) scaleY(.99)}100%{opacity:1;transform:translateY(0) scaleY(1)}}
 .pl-detail-actions{display:flex;align-items:center;gap:8px;margin:6px 2px 8px;padding:0 2px}
 .pl-detail-play{height:30px;min-width:98px;padding:0 12px;border-radius:999px;border:1px solid rgba(var(--fc-accent-rgb),.32);background:rgba(var(--fc-accent-rgb),.10);color:#fff;font:700 11.5px var(--font-sans);display:inline-flex;align-items:center;justify-content:center;gap:7px;cursor:pointer}
 .pl-detail-play svg{width:13px;height:13px;fill:currentColor}
-.pl-detail-list{display:flex;flex-direction:column;gap:5px;padding:0 2px 6px;scroll-behavior:smooth}
-.pl-detail-row{display:flex;align-items:center;gap:9px;padding:7px;border-radius:10px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.04);cursor:pointer}
+.pl-detail-list{display:flex;flex-direction:column;gap:0;padding:0 2px 6px;scroll-behavior:smooth}
+.pl-detail-row{display:flex;align-items:center;gap:9px;height:50px;margin-bottom:5px;box-sizing:border-box;padding:7px;border-radius:10px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.04);cursor:pointer}
+.pl-inline-detail.cached .pl-detail-actions::after{content:'缓存';font-size:9px;font-weight:700;letter-spacing:.04em;color:rgba(255,255,255,.42);margin-left:8px;align-self:center}
+.pl-inline-detail.cached.offline .pl-detail-actions::after{content:'离线缓存';color:rgba(255,184,120,.85)}
 .pl-detail-row:hover{background:rgba(255,255,255,.055)}
 .pl-detail-count{margin-left:auto;color:rgba(255,255,255,.38);font-size:10.5px;white-space:nowrap}
 .pl-detail-progress{height:28px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.34);font-size:10.5px}

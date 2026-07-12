@@ -126,7 +126,9 @@ function firstLoggedProvider() {
 }
 function providerAvatarSrc(provider, status) {
   status = status || platformStatus(provider) || {};
-  if (status.avatar) return avatarSrc(status.avatar);
+  var av = status.avatar || status.avatarUrl;
+  // 与歌曲封面一致：直接使用原始 URL（Tauri 下 /api/cover 不是可直连的 HTTP 端点）
+  if (av) return coverUrlWithSize(av, 96);
   var meta = platformMeta(provider);
   var fill = provider === 'qq' ? '#bfd66b' : '#d95b67';
   var bg = provider === 'qq' ? '#11150b' : '#180b0f';

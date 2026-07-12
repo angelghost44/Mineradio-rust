@@ -47,3 +47,7 @@ hash33_verify.py
 # Secrets / keys
 src-tauri/update-key.pem
 src-tauri/update-key.pem.pub
+
+# kachina-builder packaging (build outputs & config)
+kachina.config.json
+build/
