@@ -1058,11 +1058,10 @@ function updateEmptyHomeVisibility(opts) {
   if (show) activateHomeWallpaperPreview();
   else deactivateHomeWallpaperPreview(false);
   if (show) {
-    // 先标记 preparing，让 CSS 隐藏内容，等布局完成后再显示
+    // 先标记 preparing，让 CSS 隐藏内容，等布局与首屏数据都稳定后再显示
     document.body.classList.add('home-preparing');
     setPeek(document.getElementById('search-area'), true, 'search');
     renderHomeDiscover();
-    scheduleHomeWeatherLoad(opts.forceLoad ? 1400 : 2400);
     if (!hasAnyPlatformLogin()) {
       homeDiscoverState.loading = false;
       homeDiscoverState.loaded = true;
@@ -1074,14 +1073,36 @@ function updateEmptyHomeVisibility(opts) {
       renderHomeDiscover();
     } else {
       renderHomeDiscover();
-      scheduleVisualApply(function(){ loadHomeDiscover(!!opts.forceLoad); }, 220, 1200);
     }
-    // 双 rAF 确保布局完成后再移除 preparing
-    requestAnimationFrame(function(){
-      requestAnimationFrame(function(){
-        document.body.classList.remove('home-preparing');
+    // 等 Web 字体真正加载完成后再显示内容，避免字体替换导致的整页回流抽搐（FOUT）
+    // 注意：document.fonts.ready 可能在 loli.net 样式表注册 @font-face 之前就 resolve，
+    // 所以必须显式 document.fonts.load 触发各字族加载，再 await。
+    var revealHomeShell = function(){ document.body.classList.remove('home-preparing'); };
+    var revealWithRaf = function(){ requestAnimationFrame(function(){ requestAnimationFrame(revealHomeShell); }); };
+    var fontsReady;
+    if (document.fonts && document.fonts.load) {
+      var families = ['Inter', 'Noto Sans SC', 'JetBrains Mono', 'Cinzel Decorative', 'UnifrakturCook'];
+      var loads = families.map(function(f){
+        return document.fonts.load('1em "' + f + '"').catch(function(){});
       });
-    });
+      var fontGuard = new Promise(function(res){ setTimeout(res, 1800); });
+      fontsReady = Promise.race([
+        Promise.all(loads).then(function(){ return document.fonts.ready; }),
+        fontGuard
+      ]);
+    } else {
+      fontsReady = Promise.resolve();
+    }
+    // 首屏推荐与天气数据未加载完成时，renderHomeDiscover 会多次用不同文案重渲染，
+    // 未夹紧的标题/副标题换行会改变卡片高度，导致整页网格抽搐（正常→变高→正常）。
+    // 因此等首屏数据渲染完成后再揭开，用户只会看到最终稳定布局。
+    var dataReady = Promise.all([
+      (hasAnyPlatformLogin() ? loadHomeDiscover(!!opts.forceLoad) : Promise.resolve()).catch(function(){}),
+      loadHomeWeatherRadio(!!opts.forceLoad).catch(function(){})
+    ]);
+    // 网络异常时长时兜底：最多等 2400ms 也必须显示
+    var hardGuard = new Promise(function(res){ setTimeout(res, 2400); });
+    Promise.race([ Promise.all([fontsReady, dataReady]), hardGuard ]).then(revealWithRaf);
   }
   return show;
 }

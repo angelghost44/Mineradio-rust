@@ -1772,6 +1772,17 @@ function updateSearchPillGlassDisplacementMap() {
   try { img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href); } catch (e) {}
 }
 function initControlGlassSurface() {
+  // 合并多次 observer/resize 触发的玻璃位移更新，避免在同一帧堆叠多个 rAF 回调
+  var glassUpdateRaf = 0;
+  function scheduleGlassUpdate() {
+    if (glassUpdateRaf) cancelAnimationFrame(glassUpdateRaf);
+    glassUpdateRaf = requestAnimationFrame(function(){
+      glassUpdateRaf = 0;
+      updateControlGlassDisplacementMap();
+      updateSearchBoxGlassDisplacementMap();
+      updateSearchPillGlassDisplacementMap();
+    });
+  }
   if (supportsControlGlassSvgFilter()) document.documentElement.classList.add('control-glass-svg-ok');
   applyControlGlassChromaticOffset();
   updateControlGlassDisplacementMap();
@@ -1782,28 +1793,18 @@ function initControlGlassSurface() {
   var searchTabs = document.getElementById('search-mode-tabs');
   var searchResults = document.getElementById('search-results');
   if (window.ResizeObserver && (bar || searchBox || searchTabs || searchResults)) {
-    var ro = new ResizeObserver(function(){
-      requestAnimationFrame(updateControlGlassDisplacementMap);
-      requestAnimationFrame(updateSearchBoxGlassDisplacementMap);
-      requestAnimationFrame(updateSearchPillGlassDisplacementMap);
-    });
+    var ro = new ResizeObserver(scheduleGlassUpdate);
     if (bar) ro.observe(bar);
     if (searchBox) ro.observe(searchBox);
     if (searchTabs) ro.observe(searchTabs);
     if (searchResults) ro.observe(searchResults);
   }
   if (window.MutationObserver && (searchTabs || searchResults)) {
-    var mo = new MutationObserver(function(){
-      requestAnimationFrame(updateSearchPillGlassDisplacementMap);
-    });
+    var mo = new MutationObserver(scheduleGlassUpdate);
     if (searchTabs) mo.observe(searchTabs, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
     if (searchResults) mo.observe(searchResults, { childList: true, subtree: true });
   }
-  window.addEventListener('resize', function(){
-    requestAnimationFrame(updateControlGlassDisplacementMap);
-    requestAnimationFrame(updateSearchBoxGlassDisplacementMap);
-    requestAnimationFrame(updateSearchPillGlassDisplacementMap);
-  });
+  window.addEventListener('resize', scheduleGlassUpdate);
 }
 
 function bindPlayerControlAnimations() {
@@ -2330,7 +2331,7 @@ async function refreshUserPlaylists(force) {
   if ($pod) $pod.innerHTML = miniQueueSkeleton();
   try {
     var result = await Promise.all([
-      loginStatus.loggedIn ? apiJson('/api/user/playlists') : Promise.resolve({ playlists: [] }),
+      loginStatus.loggedIn ? apiJson('/api/user/playlists?uid=' + encodeURIComponent(loginStatus.userId || 0)) : Promise.resolve({ playlists: [] }),
       loginStatus.loggedIn ? apiJson('/api/podcast/my') : Promise.resolve({ collections: [], loggedIn: false }),
       qqLoginStatus.loggedIn ? apiJson('/api/qq/user/playlists') : Promise.resolve({ playlists: [] })
     ]);
@@ -2346,47 +2347,130 @@ async function refreshUserPlaylists(force) {
   } catch (e) { console.warn(e); }
 }
 var playlistPanelDetailState = { key: '', loading: false, playlist: null, tracks: [], token: 0, renderLimit: PLAYLIST_DETAIL_INITIAL_RENDER };
+// 歌单详情曲目缓存：内存 + 磁盘(localStorage) 双层，支持离线显示
+var playlistDetailCache = {};
+var PLAYLIST_DETAIL_DISK_PREFIX = 'pl-detail:';
+var PLAYLIST_DETAIL_ROW_H = 55; // 固定行高(50) + 行间距(5)，配合可视区回收
+
+function playlistDetailDiskKey(key) { return PLAYLIST_DETAIL_DISK_PREFIX + key; }
+function loadPlaylistDetailFromDisk(key) {
+  try {
+    var raw = localStorage.getItem(playlistDetailDiskKey(key));
+    if (!raw) return null;
+    var entry = JSON.parse(raw);
+    if (!entry || !entry.tracks) return null;
+    return entry;
+  } catch (e) { return null; }
+}
+function savePlaylistDetailToDisk(key, tracks) {
+  try { localStorage.setItem(playlistDetailDiskKey(key), JSON.stringify({ tracks: tracks, ts: Date.now() })); } catch (e) {}
+}
+function getPlaylistDetailCache(key) {
+  if (playlistDetailCache[key]) return playlistDetailCache[key];
+  var disk = loadPlaylistDetailFromDisk(key);
+  if (disk) playlistDetailCache[key] = disk;
+  return disk;
+}
 function playlistPanelKey(provider, id) {
   return (provider === 'qq' ? 'qq' : 'netease') + ':' + String(id || '');
 }
 function playlistPanelProviderId(provider, id) {
   return provider === 'qq' ? ('qq:' + id) : id;
 }
+function playlistDetailRowHtml(song, i) {
+  var thumb = songCoverSrc(song, 60);
+  var imgTag = thumb ? '<img src="' + escHtml(thumb) + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:34px;height:34px;border-radius:7px;background:rgba(255,255,255,.06);flex:0 0 auto"></div>';
+  return '<div class="pl-detail-row" data-pl-detail-row="' + i + '">' +
+    imgTag +
+    '<div style="flex:1;min-width:0"><div class="pl-detail-row-title">' + escHtml(song.name || '') + '</div>' +
+    '<button type="button" class="pl-detail-row-artist" data-pl-detail-artist="' + i + '">' + escHtml(song.artist || '未知歌手') + '</button></div>' +
+  '</div>';
+}
+// 可视区回收：仅渲染面板视口内的行，其余用占位撑高，避免长歌单 DOM 膨胀
+function playlistDetailWindowHtml(st) {
+  var tracks = st.tracks || [];
+  var n = tracks.length;
+  if (!n) return '';
+  var panel = document.getElementById('playlist-panel');
+  var list = panel ? panel.querySelector('.pl-inline-detail[data-pl-detail="' + st.key + '"] .pl-detail-list') : null;
+  var rowH = PLAYLIST_DETAIL_ROW_H;
+  if (!list || !panel || panel.clientHeight <= 0) {
+    return tracks.slice(0, PLAYLIST_DETAIL_INITIAL_RENDER).map(playlistDetailRowHtml).join('');
+  }
+  var listRect = list.getBoundingClientRect();
+  var panelRect = panel.getBoundingClientRect();
+  var listTop = listRect.top - panelRect.top + panel.scrollTop;
+  var viewTop = panel.scrollTop - listTop;
+  var viewBottom = panel.scrollTop + panel.clientHeight - listTop;
+  var buffer = 6;
+  var start = Math.max(0, Math.floor(viewTop / rowH) - buffer);
+  var end = Math.min(n, Math.ceil(viewBottom / rowH) + buffer);
+  if (start >= end) { start = 0; end = Math.min(n, PLAYLIST_DETAIL_INITIAL_RENDER); }
+  var html = '';
+  if (start > 0) html += '<div class="pl-detail-gap" style="height:' + (start * rowH) + 'px"></div>';
+  for (var i = start; i < end; i++) html += playlistDetailRowHtml(tracks[i], i);
+  if (end < n) html += '<div class="pl-detail-gap" style="height:' + ((n - end) * rowH) + 'px"></div>';
+  return html;
+}
+function playlistPanelDetailInnerHtml(st) {
+  var tracks = st.tracks || [];
+  var loading = st.loading;
+  var total = tracks.length;
+  var listInner = loading
+    ? '<div class="pl-detail-row"><div style="width:34px;height:34px;border-radius:7px;background:rgba(255,255,255,.06)"></div><div style="flex:1;min-width:0"><div class="pl-detail-row-title">正在载入歌单</div><div class="pl-detail-row-artist">请稍候</div></div></div>'
+    : (total ? playlistDetailWindowHtml(st) : '<div style="text-align:center;padding:14px 0;color:rgba(255,255,255,.30);font-size:11.5px">歌单暂无可播放歌曲</div>');
+  return '<div class="pl-detail-actions">' +
+    '<button class="pl-detail-play" type="button" data-pl-detail-play="' + escHtml(st.key) + '"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>播放全部</button>' +
+    '<span class="pl-detail-count">' + (loading ? '载入中' : (total + ' 首')) + '</span>' +
+  '</div>' +
+  '<div class="pl-detail-list">' + listInner + '</div>';
+}
 function playlistPanelDetailHtml(pl, provider) {
   var key = playlistPanelKey(provider, pl && pl.id);
   if (playlistPanelDetailState.key !== key) return '';
-  var tracks = playlistPanelDetailState.tracks || [];
-  var loading = playlistPanelDetailState.loading;
-  var renderLimit = loading ? 0 : Math.max(PLAYLIST_DETAIL_INITIAL_RENDER, playlistPanelDetailState.renderLimit || PLAYLIST_DETAIL_INITIAL_RENDER);
-  renderLimit = Math.min(tracks.length, renderLimit);
-  var visibleTracks = loading ? [] : tracks.slice(0, renderLimit);
-  var rows = loading
-    ? '<div class="pl-detail-row"><div style="width:34px;height:34px;border-radius:7px;background:rgba(255,255,255,.06)"></div><div style="flex:1;min-width:0"><div class="pl-detail-row-title">正在载入歌单</div><div class="pl-detail-row-artist">请稍候</div></div></div>'
-    : visibleTracks.map(function(song, i){
-        var thumb = songCoverSrc(song, 60);
-        var imgTag = thumb ? '<img src="' + escHtml(thumb) + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:34px;height:34px;border-radius:7px;background:rgba(255,255,255,.06);flex:0 0 auto"></div>';
-        return '<div class="pl-detail-row" data-pl-detail-row="' + i + '">' +
-          imgTag +
-          '<div style="flex:1;min-width:0"><div class="pl-detail-row-title">' + escHtml(song.name || '') + '</div>' +
-          '<button type="button" class="pl-detail-row-artist" data-pl-detail-artist="' + i + '">' + escHtml(song.artist || '未知歌手') + '</button></div>' +
-        '</div>';
-      }).join('');
-  if (!loading && !rows) rows = '<div style="text-align:center;padding:14px 0;color:rgba(255,255,255,.30);font-size:11.5px">歌单暂无可播放歌曲</div>';
-  if (!loading && tracks.length > renderLimit) {
-    rows += '<button type="button" class="fx-mini-btn ghost pl-detail-load-more" data-pl-detail-load-more="1">加载更多 ' + renderLimit + '/' + tracks.length + '</button>';
-  } else if (!loading && tracks.length > PLAYLIST_DETAIL_INITIAL_RENDER) {
-    rows += '<div class="pl-detail-progress">已显示全部 ' + tracks.length + ' 首</div>';
-  }
-  return '<div class="pl-inline-detail" data-pl-detail="' + escHtml(key) + '">' +
-    '<div class="pl-detail-actions">' +
-      '<button class="pl-detail-play" type="button" data-pl-detail-play="' + escHtml(key) + '"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>播放全部</button>' +
-      '<span class="pl-detail-count">' + (loading ? '载入中' : (renderLimit + '/' + tracks.length)) + '</span>' +
-    '</div>' +
-    '<div class="pl-detail-list">' + rows + '</div>' +
-  '</div>';
+  return '<div class="pl-inline-detail" data-pl-detail="' + escHtml(key) + '">' + playlistPanelDetailInnerHtml(playlistPanelDetailState) + '</div>';
 }
 function renderPlaylistPanelDetailState() {
-  renderUserPlaylistsList();
+  var st = playlistPanelDetailState;
+  var panel = document.getElementById('playlist-panel');
+  if (!panel) { renderUserPlaylistsList(); return; }
+  if (!st.key) {
+    // 关闭：仅收起卡片并移除详情节点，不再重建整列
+    Array.prototype.forEach.call(panel.querySelectorAll('.pl-card.expanded'), function(c){ c.classList.remove('expanded'); });
+    Array.prototype.forEach.call(panel.querySelectorAll('.pl-inline-detail'), function(d){ if (d.parentNode) d.parentNode.removeChild(d); });
+    return;
+  }
+  var detailNode = panel.querySelector('.pl-inline-detail[data-pl-detail="' + st.key + '"]');
+  if (!detailNode) {
+    // 容器尚不存在（首次展开），整体渲染以插入容器
+    renderUserPlaylistsList();
+    return;
+  }
+  // 仅原地更新详情内容，避免重建整列导致动画重播与卡顿
+  detailNode.innerHTML = playlistPanelDetailInnerHtml(st);
+  updatePlaylistDetailVirtualWindow();
+}
+var playlistDetailVScrollRaf = 0;
+function updatePlaylistDetailVirtualWindow() {
+  if (playlistDetailVScrollRaf) return;
+  playlistDetailVScrollRaf = requestAnimationFrame(function(){
+    playlistDetailVScrollRaf = 0;
+    var st = playlistPanelDetailState;
+    if (!st.key || st.loading) return;
+    var panel = document.getElementById('playlist-panel');
+    if (!panel) return;
+    var list = panel.querySelector('.pl-inline-detail[data-pl-detail="' + st.key + '"] .pl-detail-list');
+    if (!list) return;
+    list.innerHTML = playlistDetailWindowHtml(st);
+  });
+}
+function markPlaylistDetailFromCache(offline) {
+  var panel = document.getElementById('playlist-panel');
+  if (!panel) return;
+  var node = panel.querySelector('.pl-inline-detail[data-pl-detail="' + playlistPanelDetailState.key + '"]');
+  if (!node) return;
+  node.classList.add('cached');
+  node.classList.toggle('offline', !!offline);
 }
 function scrollPlaylistPanelToTop() {
   var panel = document.getElementById('playlist-panel');
@@ -2430,24 +2514,74 @@ async function openPlaylistPanelDetail(provider, pid, title) {
   playlistPanelDetailState = { key: key, loading: true, playlist: pl, tracks: [], token: token, renderLimit: PLAYLIST_DETAIL_INITIAL_RENDER };
   renderPlaylistPanelDetailState();
   scrollPlaylistPanelDetailIntoView(key);
-  try {
-    var r = provider === 'qq'
-      ? await apiJson('/api/qq/playlist/tracks?id=' + encodeURIComponent(pid))
-      : await apiJson('/api/playlist/tracks?id=' + encodeURIComponent(pid));
-    if (playlistPanelDetailState.token !== token) return;
+
+  var cached = getPlaylistDetailCache(key);
+  var online = typeof navigator === 'undefined' || navigator.onLine !== false;
+
+  if (cached && cached.tracks && cached.tracks.length) {
+    // 命中缓存（内存/磁盘）：即时显示；离线则标注缓存
     playlistPanelDetailState.loading = false;
-    playlistPanelDetailState.tracks = (r && r.tracks || []).map(cloneSong);
-    playlistPanelDetailState.renderLimit = Math.min(playlistPanelDetailState.tracks.length, PLAYLIST_DETAIL_INITIAL_RENDER);
+    playlistPanelDetailState.tracks = cached.tracks.map(cloneSong);
+    playlistPanelDetailState.renderLimit = Math.min(cached.tracks.length, PLAYLIST_DETAIL_INITIAL_RENDER);
     renderPlaylistPanelDetailState();
+    markPlaylistDetailFromCache(!online);
+    if (online) {
+      // 在线：后台静默刷新，确保不错过云端更新
+      fetchPlaylistDetailTracks(provider, pid, key, token).catch(function(e){ console.warn('[PlaylistPanelDetail]', pid, e); });
+    }
+    return;
+  }
+
+  if (!online) {
+    // 离线且无缓存：无法加载
+    playlistPanelDetailState.loading = false;
+    renderPlaylistPanelDetailState();
+    showToast('离线状态且无缓存，无法加载歌单');
+    return;
+  }
+
+  try {
+    await fetchPlaylistDetailTracks(provider, pid, key, token);
   } catch (e) {
     console.warn('[PlaylistPanelDetail]', pid, e);
     if (playlistPanelDetailState.token !== token) return;
-    playlistPanelDetailState.loading = false;
-    playlistPanelDetailState.tracks = [];
-    playlistPanelDetailState.renderLimit = PLAYLIST_DETAIL_INITIAL_RENDER;
-    renderPlaylistPanelDetailState();
-    showToast('歌单详情加载失败');
+    // 请求失败：若有缓存则回退显示，否则报错
+    var fallback = getPlaylistDetailCache(key);
+    if (fallback && fallback.tracks && fallback.tracks.length) {
+      playlistPanelDetailState.loading = false;
+      playlistPanelDetailState.tracks = fallback.tracks.map(cloneSong);
+      playlistPanelDetailState.renderLimit = Math.min(fallback.tracks.length, PLAYLIST_DETAIL_INITIAL_RENDER);
+      renderPlaylistPanelDetailState();
+      markPlaylistDetailFromCache(true);
+      showToast('网络异常，已使用缓存');
+    } else {
+      playlistPanelDetailState.loading = false;
+      playlistPanelDetailState.tracks = [];
+      playlistPanelDetailState.renderLimit = PLAYLIST_DETAIL_INITIAL_RENDER;
+      renderPlaylistPanelDetailState();
+      showToast('歌单详情加载失败');
+    }
   }
+}
+function fetchPlaylistDetailTracks(provider, pid, key, token) {
+  return apiJson(provider === 'qq'
+    ? '/api/qq/playlist/tracks?id=' + encodeURIComponent(pid)
+    : '/api/playlist/tracks?id=' + encodeURIComponent(pid)
+  ).then(function(r){
+    if (playlistPanelDetailState.key !== key || playlistPanelDetailState.token !== token) return;
+    var tracks = (r && r.tracks || []).map(cloneSong);
+    // 写入内存 + 磁盘双层缓存
+    playlistDetailCache[key] = { tracks: tracks, ts: Date.now() };
+    savePlaylistDetailToDisk(key, tracks);
+    playlistPanelDetailState.loading = false;
+    playlistPanelDetailState.tracks = tracks;
+    playlistPanelDetailState.renderLimit = Math.min(tracks.length, PLAYLIST_DETAIL_INITIAL_RENDER);
+    renderPlaylistPanelDetailState();
+    // 在线刷新成功：移除缓存标注
+    var panel = document.getElementById('playlist-panel');
+    var node = panel ? panel.querySelector('.pl-inline-detail[data-pl-detail="' + key + '"]') : null;
+    if (node) node.classList.remove('cached', 'offline');
+  });
 }
 function playPlaylistPanelDetail() {
   var st = playlistPanelDetailState;
@@ -2473,26 +2607,13 @@ function openPlaylistPanelDetailArtist(index) {
   if (song) openArtistDetailForSong(song);
 }
 function growPlaylistPanelDetailRenderLimit(amount) {
-  var st = playlistPanelDetailState;
-  var total = st && st.tracks ? st.tracks.length : 0;
-  if (!st || st.loading || !st.key || !total) return false;
-  var current = Math.max(PLAYLIST_DETAIL_INITIAL_RENDER, st.renderLimit || PLAYLIST_DETAIL_INITIAL_RENDER);
-  var next = Math.min(total, current + (amount || PLAYLIST_DETAIL_BATCH_SIZE));
-  if (next <= current) return false;
-  var panel = document.getElementById('playlist-panel');
-  var keepTop = panel ? panel.scrollTop : 0;
-  st.renderLimit = next;
-  renderPlaylistPanelDetailState();
-  if (panel) panel.scrollTop = keepTop;
+  // 已启用可视区回收，渲染由滚动驱动，此处仅触发一次窗口刷新
+  updatePlaylistDetailVirtualWindow();
   return true;
 }
 function maybeGrowPlaylistPanelDetailRenderLimit() {
-  var panel = document.getElementById('playlist-panel');
-  var st = playlistPanelDetailState;
-  if (!panel || !st || st.loading || !st.key || !st.tracks || st.renderLimit >= st.tracks.length) return;
-  if (panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 240) {
-    growPlaylistPanelDetailRenderLimit();
-  }
+  // 详情列表改为滚动驱动的可视区回收
+  updatePlaylistDetailVirtualWindow();
 }
 function resetPlaylistPanelRenderLimit() {
   playlistPanelRenderLimit = PLAYLIST_PANEL_BATCH_SIZE;

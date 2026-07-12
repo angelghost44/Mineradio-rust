@@ -637,7 +637,7 @@ impl OnlineApiState {
             "code": code,
             "message": body["message"],
             "nickname": body["nickname"],
-            "avatarUrl": body["avatarUrl"],
+            "avatar": body["avatarUrl"],
             "loggedIn": code == 803,
             "hasCookie": code == 803,
             "pendingProfile": false,
@@ -676,7 +676,7 @@ impl OnlineApiState {
             "loggedIn": user_id > 0,
             "userId": user_id,
             "nickname": profile["nickname"].as_str().unwrap_or("网易云用户"),
-            "avatarUrl": profile["avatarUrl"].as_str().unwrap_or(""),
+            "avatar": profile["avatarUrl"].as_str().unwrap_or(""),
             "vipType": vip_type,
             "hasCookie": !cookie.is_empty(),
         }))
@@ -700,7 +700,7 @@ impl OnlineApiState {
                     "loggedIn": true,
                     "userId": info["userId"],
                     "nickname": info["nickname"],
-                    "avatarUrl": info["avatarUrl"],
+                    "avatar": info["avatar"],
                     "saved": true,
                     "hasCookie": true,
                 }))
@@ -730,7 +730,7 @@ impl OnlineApiState {
     // ---- user ----
 
     async fn user_playlists(&self, params: &Value, cookie: &str) -> Result<Value, String> {
-        let mut uid = params["uid"].as_i64().unwrap_or(0);
+        let mut uid = value_as_id(&params["uid"]);
         let limit = params["limit"].as_i64().unwrap_or(60);
         let offset = params["offset"].as_i64().unwrap_or(0);
 
@@ -773,17 +773,30 @@ impl OnlineApiState {
     }
 
     async fn playlist_tracks(&self, params: &Value, cookie: &str) -> Result<Value, String> {
-        // Use playlist_detail endpoint to get songs
+        // 仅取轻量的 trackIds 列表，再用 song/detail 解析曲目，
+        // 避免 n:100000 一次性把整张歌单（含全部曲目元信息）inline 返回。
         let id = value_as_id(&params["id"]);
-        let data = json!({"id": id, "n": 100000, "s": 8});
+        let data = json!({"id": id, "n": 1000, "s": 8});
         let res = self.weapi_request("/api/v6/playlist/detail", data, cookie).await?;
-        let body = &res["body"];
-        let tracks = body["playlist"]["tracks"].as_array().cloned().unwrap_or_default();
-        let mapped: Vec<Value> = tracks.iter().map(|s| map_netease_song(s)).collect();
+        let track_ids = res["body"]["playlist"]["trackIds"]
+            .as_array()
+            .ok_or("no trackIds")?;
+        let c_value: String = format!(
+            "[{}]",
+            track_ids
+                .iter()
+                .map(|t| format!("{{\"id\":{}}}", t["id"]))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let data2 = json!({ "c": c_value });
+        let res2 = self.weapi_request("/api/v3/song/detail", data2, cookie).await?;
+        let songs = res2["body"]["songs"].as_array().cloned().unwrap_or_default();
+        let mapped: Vec<Value> = songs.iter().map(|s| map_netease_song(s)).collect();
         Ok(json!({
             "songs": mapped,
             "tracks": mapped,
-            "privileges": body["privileges"],
+            "privileges": res["body"]["privileges"],
         }))
     }
 
@@ -816,11 +829,11 @@ impl OnlineApiState {
         Ok(json!({"songs": mapped2, "tracks": mapped2}))
     }
 
-async fn playlist_detail(&self, params: &Value, cookie: &str) -> Result<Value, String> {
-let id = value_as_id(&params["id"]);
-let data = json!({"id": id, "n": 100000, "s": 8});
-let res = self.weapi_request("/api/v6/playlist/detail", data, cookie).await?;
-Ok(json!({"playlist": res["body"]["playlist"]}))
+    async fn playlist_detail(&self, params: &Value, cookie: &str) -> Result<Value, String> {
+        let id = value_as_id(&params["id"]);
+        let data = json!({"id": id, "n": 100000, "s": 8});
+        let res = self.weapi_request("/api/v6/playlist/detail", data, cookie).await?;
+        Ok(json!({"playlist": res["body"]["playlist"]}))
     }
 
     async fn playlist_add_song(&self, params: &Value, cookie: &str) -> Result<Value, String> {
