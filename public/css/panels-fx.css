@@ -55,6 +55,14 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 #qr-status.scan{color:#7ee2a8}
 #qr-status.fail{color:#f08080}
 #qr-status.preview{color:rgba(191,214,107,.86)}
+.qr-shell.logged-in{height:auto;min-height:0;margin-bottom:8px;background:none;border:none;box-shadow:none}
+.qr-shell.logged-in #qr-img{display:none}
+#qr-status.logged-in{color:#7ee2a8;font-size:13px;letter-spacing:.4px}
+.login-account-panel{display:flex;flex-direction:column;align-items:center;padding:6px 0 4px}
+.login-account-avatar{width:72px;height:72px;border-radius:50%;margin:0 auto 12px;object-fit:cover;background:rgba(255,255,255,.1);display:block}
+.login-account-name{font-size:15px;margin-bottom:4px}
+.login-account-vip{font-size:11px;color:rgba(255,255,255,.5);margin-bottom:20px;letter-spacing:.5px}
+#login-account-logout{margin-top:2px}
 .account-provider-chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;margin-bottom:10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.035);font-size:10.5px;letter-spacing:.5px;color:rgba(255,255,255,.58)}
 .account-provider-chip.netease{border-color:rgba(217,91,103,.26);color:#ffd7dc;background:rgba(217,91,103,.08)}
 .account-provider-chip.qq{border-color:rgba(191,214,107,.26);color:#f3ffd1;background:rgba(191,214,107,.08)}

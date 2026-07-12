@@ -155,6 +155,7 @@ async function refreshLoginStatus(force) {
     loginStatus = info || { loggedIn: false };
     if (loginStatus.loggedIn && !hasPlatformLogin(activeAccountProvider)) activeAccountProvider = 'netease';
     renderUserBtn();
+    syncLoginModalToStatus();
     if (info && info.loggedIn) {
       homeDiscoverState.loaded = false;
       homeDiscoverState.loggedIn = true;
@@ -220,6 +221,7 @@ async function refreshQQLoginStatus() {
     qqLoginWasLoggedIn = !!qqLoginStatus.loggedIn;
     if (!hasPlatformLogin(activeAccountProvider)) activeAccountProvider = firstLoggedProvider();
     renderUserBtn();
+    syncLoginModalToStatus();
     return qqLoginStatus;
   } catch (e) {
     console.warn('QQ login status failed:', e);
@@ -308,7 +310,7 @@ function updateLoginProviderUi() {
     ? '使用 <b>QQ App</b> 扫码登录，可同步歌单与播放。'
     : '使用 <b>网易云音乐 App</b> 扫码，可同步歌单、红心与播客。';
   if (shell) {
-    shell.classList.remove('web-login-preview', 'qq-preview', 'netease-preview');
+    shell.classList.remove('web-login-preview', 'qq-preview', 'netease-preview', 'logged-in');
   }
   if (qqPanel) qqPanel.classList.toggle('show', isQQ && qqManualCookieOpen);
   if (qqCookieToggle) {
@@ -325,34 +327,44 @@ function updateLoginProviderUi() {
       : (neteaseWebLoginBusy ? '等待扫码确认' : '打开官方登录窗口');
   }
   if (st) {
-    st.className = isQQ ? '' : '';
-    st.textContent = isQQ
-      ? (qqLoginStatus.loggedIn ? ('已保存 QQ 音乐会话 · ' + (qqLoginStatus.nickname || '')) : '正在生成二维码…')
-      : (loginStatus.loggedIn ? ('已保存网易云会话 · ' + (loginStatus.nickname || '')) : '正在生成二维码…');
+    st.className = '';
+    st.textContent = '正在生成二维码…';
   }
   if (refreshBtn) {
     refreshBtn.disabled = isQQ ? !!qqWebLoginBusy : !!neteaseWebLoginBusy;
     refreshBtn.textContent = '刷新二维码';
-    refreshBtn.onclick = refreshQr;
+    refreshBtn.onclick = function () { refreshQr(true); };
   }
+  updateLoginAccountPanel();
 }
-async function refreshQr() {
+async function refreshQr(forceQr) {
   stopQrPoll();
   updateLoginProviderUi();
-  if (loginProvider === 'qq') {
+  var isQQ = loginProvider === 'qq';
+  var alreadyLoggedIn = isQQ ? !!qqLoginStatus.loggedIn : !!loginStatus.loggedIn;
+  if (!forceQr && alreadyLoggedIn) {
+    return;
+  }
+  var acctPanel = document.getElementById('login-account-panel');
+  if (acctPanel) { acctPanel.style.display = 'none'; acctPanel.classList.remove('show'); }
+  var qrShell = document.getElementById('qr-shell');
+  var qrStatus = document.getElementById('qr-status');
+  if (qrShell) qrShell.style.display = '';
+  if (qrStatus) qrStatus.style.display = '';
+  if (isQQ) {
     var qqImgEl = document.getElementById('qr-img');
     if (qqImgEl) qqImgEl.src = '';
-    document.getElementById('qr-status').textContent = '正在获取 QQ 二维码…';
+    var qqSt = document.getElementById('qr-status');
+    if (qqSt) { qqSt.className = ''; qqSt.textContent = '正在获取 QQ 二维码…'; }
     try {
       var qqQr = await apiJson('/api/qq/login/qr/key');
       if (!qqQr || !qqQr.img) throw new Error('获取 QQ 二维码失败');
       qrKey = qqQr.key || 'qq_qrsig';
       document.getElementById('qr-img').src = qqQr.img;
-      document.getElementById('qr-status').textContent = '请使用 QQ App 扫码';
+      if (qqSt) { qqSt.className = ''; qqSt.textContent = '请使用 QQ App 扫码'; }
       startQrPoll();
     } catch (e) {
-      document.getElementById('qr-status').textContent = '出错: ' + e.message;
-      document.getElementById('qr-status').className = 'fail';
+      if (qqSt) { qqSt.textContent = '出错: ' + e.message; qqSt.className = 'fail'; }
     }
     return;
   }
@@ -363,12 +375,77 @@ async function refreshQr() {
     var q = await apiJson('/api/login/qr/create?key=' + encodeURIComponent(qrKey));
     if (!q.img) throw new Error('生成二维码失败');
     document.getElementById('qr-img').src = q.img;
-    document.getElementById('qr-status').textContent = '请使用网易云音乐 App 扫码';
+    var neSt = document.getElementById('qr-status');
+    if (neSt) { neSt.className = ''; neSt.textContent = '请使用网易云音乐 App 扫码'; }
     startQrPoll();
   } catch (e) {
-    document.getElementById('qr-status').textContent = '出错: ' + e.message;
-    document.getElementById('qr-status').className = 'fail';
+    var neSt2 = document.getElementById('qr-status');
+    if (neSt2) { neSt2.textContent = '出错: ' + e.message; neSt2.className = 'fail'; }
   }
+}
+function syncLoginModalToStatus() {
+  var modal = document.getElementById('login-modal');
+  if (!modal || !modal.classList.contains('show')) return;
+  var isQQ = loginProvider === 'qq';
+  var loggedIn = isQQ ? !!qqLoginStatus.loggedIn : !!loginStatus.loggedIn;
+  if (loggedIn) refreshQr();
+}
+function updateLoginAccountPanel() {
+  var panel = document.getElementById('login-account-panel');
+  if (!panel) return;
+  var isQQ = loginProvider === 'qq';
+  var st = platformStatus(loginProvider);
+  var meta = platformMeta(loginProvider);
+  var loggedIn = !!(st && st.loggedIn);
+  var qrShell = document.getElementById('qr-shell');
+  var qrStatus = document.getElementById('qr-status');
+  var qqPanel = document.getElementById('qq-cookie-panel');
+  var title = document.getElementById('login-modal-title');
+  var desc = document.getElementById('login-modal-desc');
+  if (loggedIn) {
+    panel.style.display = '';
+    panel.classList.add('show');
+    var avatar = document.getElementById('login-account-avatar');
+    var name = document.getElementById('login-account-name');
+    var vipEl = document.getElementById('login-account-vip');
+    var logoutBtn = document.getElementById('login-account-logout');
+    var chip = document.getElementById('login-account-chip');
+    if (chip) {
+      chip.className = 'account-provider-chip ' + loginProvider;
+      chip.innerHTML = '<span class="account-source-dot ' + meta.dot + '"></span><span>' + meta.label + '</span>';
+    }
+    if (avatar) avatar.src = providerAvatarSrc(loginProvider, st);
+    if (name) name.textContent = (st && st.nickname) || meta.label;
+    if (vipEl) {
+      if (isQQ) {
+        var qqVipLabel = hasProviderVip('qq', st) ? 'QQ VIP 会员' : 'QQ 音乐会话';
+        vipEl.textContent = 'UID: ' + ((st && st.userId) || '-') + '  ·  ' + qqVipLabel;
+        vipEl.style.color = hasProviderVip('qq', st) ? 'rgba(var(--fc-accent-rgb),0.82)' : 'rgba(var(--fc-accent-rgb),0.58)';
+      } else {
+        var neVipLevel = providerVipLevel('netease', st);
+        var vipLabel = neVipLevel === 'svip' ? '网易云 SVIP' : (neVipLevel === 'vip' ? '网易云 VIP' : '普通用户');
+        vipEl.textContent = 'UID: ' + ((st && st.userId) || '-') + '  ·  ' + vipLabel;
+        vipEl.style.color = hasProviderVip('netease', st) ? 'rgba(244,210,138,0.86)' : 'rgba(255,255,255,0.5)';
+      }
+    }
+    if (logoutBtn) logoutBtn.textContent = isQQ ? '退出 QQ 音乐' : '退出网易云';
+    if (title) title.textContent = meta.label + '账号';
+    if (desc) desc.innerHTML = '已登录 ' + meta.label + '，可在此查看账号或退出登录。';
+    if (qrShell) qrShell.style.display = 'none';
+    if (qrStatus) qrStatus.style.display = 'none';
+    if (qqPanel) qqPanel.classList.remove('show');
+  } else {
+    panel.style.display = 'none';
+    panel.classList.remove('show');
+    if (qrShell) qrShell.style.display = '';
+    if (qrStatus) qrStatus.style.display = '';
+  }
+}
+async function logoutLoginProvider() {
+  activeAccountProvider = loginProvider;
+  await logoutActiveAccount();
+  updateLoginProviderUi();
+  refreshQr(true);
 }
 function startQrPoll() { if (qrPollTimer) clearInterval(qrPollTimer); qrPollTimer = setInterval(checkQr, 2000); }
 function stopQrPoll() { if (qrPollTimer) { clearInterval(qrPollTimer); qrPollTimer = null; } }
@@ -386,7 +463,7 @@ async function openNeteaseWebLogin() {
   var api = window.desktopWindow;
   if (!api || !api.isDesktop || typeof api.openNeteaseMusicLogin !== 'function') {
     if (statusEl) { statusEl.textContent = '当前环境不支持官方网页登录，正在尝试旧二维码…'; statusEl.className = 'fail'; }
-    return refreshQr();
+    return refreshQr(true);
   }
 
   neteaseWebLoginBusy = true;

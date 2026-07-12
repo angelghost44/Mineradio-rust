@@ -1475,6 +1475,7 @@ async function attemptAudioPlay(opts) {
       await resumeAudioAnalysis();
       switchPlaybackVisualToEmily();
       playing = true; setPlayIcon(true);
+      if (typeof requestRender === 'function') requestRender();
     if (opts.fade !== false) startPlaybackFadeIn();
     else restorePlaybackGain();
     forcePlaybackControlsInteractive();

@@ -623,9 +623,11 @@ impl OnlineApiState {
         let res = self.eapi_request("/api/login/qrcode/client/login", data, cookie).await?;
         let body = &res["body"];
         let code = body["code"].as_i64().unwrap_or(0);
-        let authorized = code >= 800 && code <= 803;
 
-        if authorized {
+        // 仅在登录成功(803)时保存 cookie。
+        // 800/801/802 等轮询中间态也会随响应返回(匿名) cookie，
+        // 若在此覆盖会清掉已登录的 MUSIC_U 会话，导致自动退出登录。
+        if code == 803 {
             if let Some(cookie_str) = res["cookie"].as_str() {
                 if !cookie_str.is_empty() {
                     self.set_cookie(cookie_str);

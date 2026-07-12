@@ -318,6 +318,7 @@ function startColorMixTween(durationMs) {
   var start = performance.now();
   uniforms.uColorMixT.value = 0;
   function step(now) {
+    if (typeof requestRender === 'function') requestRender();
     var t = Math.min(1, (now - start) / durationMs);
     t = visualEase(t);
     uniforms.uColorMixT.value = t;
@@ -335,6 +336,7 @@ function tweenParticleAlpha(from, to, durationMs) {
   if (alphaTween) cancelAnimationFrame(alphaTween.raf);
   var start = performance.now();
   function step(now) {
+    if (typeof requestRender === 'function') requestRender();
     var t = Math.min(1, (now - start) / durationMs);
     t = t * t * (3 - 2 * t);
     uniforms.uAlpha.value = from + (to - from) * t;
@@ -347,6 +349,7 @@ function tweenFloatAlpha(from, to, durationMs) {
   if (floatAlphaTween) cancelAnimationFrame(floatAlphaTween.raf);
   var start = performance.now();
   function step(now) {
+    if (typeof requestRender === 'function') requestRender();
     var t = Math.min(1, (now - start) / durationMs);
     t = t * t * (3 - 2 * t);
     uniforms.uFloatAlpha.value = from + (to - from) * t;
@@ -388,6 +391,7 @@ function tweenLoading(to, durationMs, onComplete) {
   var start = performance.now();
   var from = uniforms.uLoading.value;
   function step(now) {
+    if (typeof requestRender === 'function') requestRender();
     var t = Math.min(1, (now - start) / durationMs);
     var eased = visualEase(t);
     uniforms.uLoading.value = from + (to - from) * eased;
@@ -470,6 +474,7 @@ function setCoverDepthState(depthTo, aiTo, durationMs) {
   }
   var start = performance.now();
   function step(now) {
+    if (typeof requestRender === 'function') requestRender();
     var t = Math.min(1, (now - start) / durationMs);
     var eased = visualEase(t);
     uniforms.uHasDepth.value = depthFrom + (depthTo - depthFrom) * eased;

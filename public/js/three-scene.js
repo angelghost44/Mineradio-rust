@@ -3,7 +3,7 @@
 var scene = new THREE.Scene();
 scene.background = null;
 var camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
-var RENDER_DPR_CAP = 1.35;
+var RENDER_DPR_CAP = 1.0;
 var RENDER_PIXEL_BUDGET = 5200000;
 var RENDER_MIN_DPR = 0.72;
 // 0 = display vsync. Keep visible playback high-refresh capable instead of capping 120Hz+ screens to 60/72.
@@ -43,6 +43,7 @@ function markRenderInteraction(reason, holdMs) {
   renderInteractionBoostUntil = Math.max(renderInteractionBoostUntil, now + (holdMs || RENDER_INTERACTION_HOLD_MS));
   renderInteractionReason = reason || renderInteractionReason || 'interaction';
   if (typeof renderPerfState !== 'undefined' && renderPerfState) renderPerfState.lastRenderAt = 0;
+  if (typeof requestRender === 'function') requestRender();
 }
 function isRenderInteractionActive(now) {
   return (now || performance.now()) < renderInteractionBoostUntil;
@@ -1871,6 +1872,7 @@ window.addEventListener('mousedown', function(e){
   beginParticlePointerDrag(e);
 }, true);
 window.addEventListener('mousemove', function(e){
+  if (typeof requestRender === 'function') requestRender();
   updateControlsAutoHideFromPointer(e.clientX, e.clientY);
   idleGuidePointerMove(e);
   if (freeCamera && freeCamera.active) {

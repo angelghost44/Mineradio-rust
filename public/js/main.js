@@ -22,6 +22,7 @@ function scheduleMainRendererViewportRefresh(reason) {
 window.addEventListener('resize', function(){
   scheduleMainRendererViewportRefresh('resize');
   if (desktopRuntimeState.fullscreen || desktopFullscreenActive || document.fullscreenElement || document.body.classList.contains('desktop-fullscreen')) layoutFullscreenDiyZone();
+  if (typeof requestRender === 'function') requestRender();
 });
 document.addEventListener('keydown', function(e){
   if (isTypingTarget(e.target)) return;
@@ -947,6 +948,7 @@ function dismissSplash() {
   }
   revealIdleParticles(0, reduceSplashMotion ? 700 : 2400);
   document.body.classList.add('splash-revealing');
+  if (typeof requestRender === 'function') requestRender();
   s.classList.add('exiting');
 
   var content = s.querySelector('.splash-content');
@@ -1504,10 +1506,42 @@ function sampleRenderPerf(now, dt) {
   }
   maybeTrimRuntimeCaches(now);
 }
-function animate() {
+var renderLoopActive = false;
+var windowFocused = true;
+var pointerInsideWindow = true;
+var idleParallaxEps = 0.0015;
+function requestRender() {
+  if (renderLoopActive) return;
+  renderLoopActive = true;
   requestAnimationFrame(animate);
+}
+function parallaxConverged() {
+  return Math.abs(pointerParallax.x - pointerTarget.x) < idleParallaxEps
+      && Math.abs(pointerParallax.y - pointerTarget.y) < idleParallaxEps;
+}
+function isSplashRevealing() {
+  return document.body.classList.contains('splash-active') && document.body.classList.contains('splash-revealing');
+}
+function visualActivityActive() {
+  if (playing) return true;
+  if (isRenderInteractionActive()) return true;
+  if (isDeepBackgroundMode()) return true;
+  if (isSplashRevealing()) return true;
+  if (windowFocused && pointerInsideWindow) return true;
+  if (!parallaxConverged()) return true;
+  return false;
+}
+function scheduleNextFrame() {
+  if (visualActivityActive()) requestAnimationFrame(animate);
+  else renderLoopActive = false;
+}
+window.addEventListener('blur', function(){ windowFocused = false; if (typeof requestRender === 'function') requestRender(); });
+window.addEventListener('focus', function(){ windowFocused = true; pointerInsideWindow = true; if (typeof requestRender === 'function') requestRender(); });
+document.addEventListener('mouseleave', function(){ pointerInsideWindow = false; if (typeof requestRender === 'function') requestRender(); });
+document.addEventListener('mouseenter', function(){ pointerInsideWindow = true; if (typeof requestRender === 'function') requestRender(); });
+function animate() {
   var now = performance.now();
-  if (shouldSkipAdaptiveRenderFrame(now)) return;
+  if (shouldSkipAdaptiveRenderFrame(now)) { scheduleNextFrame(); return; }
   var dt = Math.min((now - prevTime) / 1000, 0.05);
   prevTime = now;
   sampleRenderPerf(now, dt);
@@ -1517,6 +1551,7 @@ function animate() {
       splashWarmRenderLast = now;
       renderer.render(scene, camera);
     }
+    scheduleNextFrame();
     return;
   }
   pointerParallax.x += (pointerTarget.x - pointerParallax.x) * 0.040;
@@ -1759,7 +1794,9 @@ function animate() {
   }
 
   renderer.render(scene, camera);
+  scheduleNextFrame();
 }
+renderLoopActive = true;
 animate();
 
 // ── Deferred initialization (forward-safe) ──

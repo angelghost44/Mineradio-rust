@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows-blue)](https://www.microsoft.com/windows)
 [![Language](https://img.shields.io/badge/language-Rust-orange)](https://www.rust-lang.org/)
 [![Framework](https://img.shields.io/badge/framework-Tauri%202-9cf)](https://tauri.app/)
-[![License](https://img.shields.io/badge/license-MIT-green)](#)
+[![License](https://img.shields.io/badge/license-GPL_3.0-blue)](https://github.com/XxHuberrr/Mineradio/blob/main/LICENSE)
 
 Mineradio 桌面音乐播放器的 Rust 移植版本。源于 [Mineradio](https://github.com/XxHuberrr/Mineradio) Electron 版，保留原生前端（JS + Three.js），后端从 Node.js 完全移植到 Rust，获得更小的体积与原生性能。
 
@@ -51,14 +51,12 @@ Mineradio-rust/
 │  ├─ tauri.conf.json
 │  ├─ Cargo.toml
 │  └─ capabilities/
-├─ public/             # 前端 (原始 Mineradio 前端文件拆分)
-│  ├─ index.html
-│  ├─ css/
-│  ├─ js/
-│  └─ vendor/
-├─ doc/                # 阶段进度文档
-└─ docs/               # 设计文档
-```
+ └─ public/             # 前端 (原始 Mineradio 前端文件拆分)
+   ├─ index.html
+   ├─ css/
+   ├─ js/
+   └─ vendor/
+ ```
 
 ---
 

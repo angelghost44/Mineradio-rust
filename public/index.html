@@ -655,7 +655,14 @@ try {
       <div class="login-intro-body">搜索或导入一首歌即可播放；登录后会同步歌单、红心和播客，让封面、歌词和粒子跟着音乐动起来。</div>
     </div>
     <h2 id="login-modal-title">扫码登录网易云音乐</h2>
-    <div id="login-modal-desc" class="desc">使用 <b>网易云音乐 App</b> 扫码，可同步歌单、红心与播客。</div>
+    <div id="login-modal-desc" class="desc">使用 <b>网易云音乐 App</b> 扫码，可同步歌单、红心和播客。</div>
+    <div id="login-account-panel" class="login-account-panel" style="display:none">
+      <div id="login-account-chip" class="account-provider-chip netease"><span class="account-source-dot netease"></span><span>网易云音乐</span></div>
+      <img id="login-account-avatar" class="login-account-avatar" src="" alt="">
+      <div id="login-account-name" class="login-account-name"></div>
+      <div id="login-account-vip" class="login-account-vip"></div>
+      <button id="login-account-logout" class="modal-btn primary" type="button" onclick="logoutLoginProvider()">退出登录</button>
+    </div>
     <div id="qr-shell" class="qr-shell">
       <img id="qr-img" src="" alt="">
       <button id="qq-web-login-card" class="qq-login-mark" type="button" onclick="openProviderWebLogin()"><b>QQ</b><span>打开官方扫码窗口</span></button>
@@ -673,7 +680,7 @@ try {
       <button class="modal-btn" onclick="skipLoginAndFocusSearch()">先搜索一首歌</button>
       <button id="login-both-btn" class="modal-btn" onclick="requestDualLoginMode()">我两个都要</button>
       <button id="qq-cookie-toggle-btn" class="modal-btn" type="button" onclick="toggleQQCookiePanel()">手动导入</button>
-      <button id="refresh-qr-btn" class="modal-btn primary" onclick="refreshQr()">刷新二维码</button>
+      <button id="refresh-qr-btn" class="modal-btn primary" onclick="refreshQr(true)">刷新二维码</button>
     </div>
   </div>
 </div>

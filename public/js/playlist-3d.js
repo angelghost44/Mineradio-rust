@@ -479,6 +479,7 @@ function makeShelfManager() {
 
   function scheduleQueuedCardBuild(job) {
     function step(deadline) {
+      if (typeof requestRender === 'function') requestRender();
       if (!job || job.cancelled || cardBuildQueue !== job || !group) return;
       var started = performance.now();
       var built = 0;
