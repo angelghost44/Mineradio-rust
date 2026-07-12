@@ -93,6 +93,26 @@ document.addEventListener('keydown', function(e){
 // ============================================================
 var PEEK_HIDE_DELAY = 170;
 var peekTimers = { search:null, fx:null, pl:null };
+// 显式跟踪鼠标按键状态——e.buttons 在 Tauri WebView2 滚动条拖拽时不可靠
+var plPointerDown = false;
+document.addEventListener('mousedown', function(e){
+  var panel = document.getElementById('playlist-panel');
+  if (panel && (panel === e.target || panel.contains(e.target))) plPointerDown = true;
+});
+document.addEventListener('mouseup', function(){ plPointerDown = false; });
+// 面板关闭前保存 scrollTop，重开时恢复
+var plSavedScrollTop = null;
+// 跟踪最后一次滚轮时间，防止滚动期间面板关闭
+var plLastWheelAt = 0;
+function bindPlWheelTracking() {
+  var panel = document.getElementById('playlist-panel');
+  if (panel && !panel.__plWheelTracked) {
+    panel.__plWheelTracked = true;
+    panel.addEventListener('wheel', function(){ plLastWheelAt = Date.now(); }, { passive: true });
+  }
+}
+bindPlWheelTracking();
+setTimeout(bindPlWheelTracking, 200);
 function setPeek(el, on, key) {
   if (!el) return;
   if (immersiveMode && on && (key === 'search' || key === 'fx')) return;
@@ -104,19 +124,21 @@ function setPeek(el, on, key) {
     var wasPeek = el.classList.contains('peek');
     if (peekTimers[key]) { clearTimeout(peekTimers[key]); peekTimers[key] = null; }
     if (key === 'fx') el.classList.remove('closing');
-    if (key === 'pl' && !wasPeek && !playQueue.length && queueViewTab === 'queue') switchPlaylistTab('playlists');
-    if (key === 'pl' && !wasPeek && playQueue.length && currentIdx >= 0) {
-      if (el.dataset && el.dataset.preserveTabOnOpen === '1') delete el.dataset.preserveTabOnOpen;
-      else if (queueViewTab !== 'queue') switchPlaylistTab('queue');
-      scrollPlaylistPanelToCurrent();
-    } else if (key === 'pl' && el.dataset && el.dataset.preserveTabOnOpen === '1') {
-      delete el.dataset.preserveTabOnOpen;
-    }
+    // 面板显隐是纯视觉行为：不切换 tab、不滚动定位、不改变内容
     el.classList.add('peek');
     if (key === 'pl' && !wasPeek) {
+      // 重新展开：恢复上次关闭时保存的滚动位置
+      if (plSavedScrollTop != null) {
+        el.scrollTop = plSavedScrollTop;
+        plSavedScrollTop = null;
+      }
+      // 仅静默刷新脏数据，不做任何动画或滚动
       scheduleUiWarmTask(function(){
-        flushDeferredQueuePanel('playlist-panel-peek');
-        if (queueViewTab === 'queue') animateVisiblePanelList(document.getElementById('queue-list'), '.queue-item', el, '.queue-item.now', { scrollActive: false });
+        if (queuePanelDirty) {
+          var savedTop = el.scrollTop;
+          flushDeferredQueuePanel('playlist-panel-peek');
+          if (el.scrollTop !== savedTop) el.scrollTop = savedTop;
+        }
       }, 180);
     }
     if (key === 'fx') {
@@ -126,6 +148,11 @@ function setPeek(el, on, key) {
   } else {
     if (peekTimers[key]) clearTimeout(peekTimers[key]);
     peekTimers[key] = setTimeout(function(){
+      if (key === 'pl') {
+        // 先杀死正在运行的 gsap 滚动动画，防止 scrollTop 在保存后继续变化
+        if (typeof el.__syncSmoothWheelTarget === 'function') el.__syncSmoothWheelTarget(el.scrollTop);
+        plSavedScrollTop = el.scrollTop;
+      }
       el.classList.remove('peek');
       if (key === 'fx') {
         var fabOff = document.getElementById('fx-fab');
@@ -301,7 +328,7 @@ window.addEventListener('mousemove', function(e){
     var inQueueTriggerImm = isPlaylistEdgeTrigger(ex, ey, H);
     var inQueuePanelImm = ppOnImm && ex >= ppRectImm.left - 18 && ex <= ppRectImm.right + 24 && ey >= ppRectImm.top - 22 && ey <= ppRectImm.bottom + 22;
     if (inQueueTriggerImm || inQueuePanelImm) setPeek(pp, true, 'pl');
-    else if (shouldClosePlaylistPanelFromPointer(ppOnImm, ex, ppRectImm)) setPeek(pp, false, 'pl');
+    else if (!plPointerDown && Date.now() - plLastWheelAt > 400 && shouldClosePlaylistPanelFromPointer(ppOnImm, ex, ppRectImm)) setPeek(pp, false, 'pl');
     var shelfCanFocusImm = !!(shelfManager && shelfManager.canInteract && shelfManager.canInteract());
     var newFocusImm = null;
     var queueFocusImm = isPlaylistPanelFocusActive(inQueueTriggerImm, inQueuePanelImm, pp, ex, ppRectImm);
@@ -336,12 +363,13 @@ window.addEventListener('mousemove', function(e){
   if (inFxFab || inFxPanel || inFxBridge) setPeek(fp, true, 'fx');
   else if (fpOn) setPeek(fp, false, 'fx');
   // 歌单/队列 DOM 面板只在左侧明确停留时出现，避免和右侧 3D 架抢焦点
+  // 当鼠标按键按下时（如拖拽滚动条），不触发面板关闭，避免滚动位置丢失
   var ppOn = pp.classList.contains('peek');
   var ppRect = pp.getBoundingClientRect();
   var inQueueTrigger = isPlaylistEdgeTrigger(ex, ey, H);
   var inQueuePanel = ppOn && ex >= ppRect.left - 18 && ex <= ppRect.right + 24 && ey >= ppRect.top - 22 && ey <= ppRect.bottom + 22;
   if (inQueueTrigger || inQueuePanel) setPeek(pp, true, 'pl');
-  else if (shouldClosePlaylistPanelFromPointer(ppOn, ex, ppRect)) setPeek(pp, false, 'pl');
+  else if (!plPointerDown && Date.now() - plLastWheelAt > 400 && shouldClosePlaylistPanelFromPointer(ppOn, ex, ppRect)) setPeek(pp, false, 'pl');
 
   // v8: 镜头跟拍触发判断
   //   - 队列面板 peek 时 → queue focus

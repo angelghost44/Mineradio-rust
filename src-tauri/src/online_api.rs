@@ -324,6 +324,7 @@ impl OnlineApiState {
 
             // ---- cookie get/set ----
             "get_cookie" => Ok(json!({"cookie": self.get_cookie()})),
+            "login_cookie" => self.login_cookie(&params).await,
             "set_cookie" => {
                 let c = params["cookie"].as_str().unwrap_or("");
                 self.set_cookie(c);
@@ -647,14 +648,76 @@ impl OnlineApiState {
         let data = json!({});
         let res = self.weapi_request("/api/w/nuser/account/get", data, cookie).await?;
         let body = &res["body"];
-        let profile = &body["profile"];
-        let user_id = profile["userId"].as_i64().unwrap_or(0);
+        // 网云 API 可能返回 body.profile 或 body.data.profile
+        let profile = if body["profile"].is_object() {
+            &body["profile"]
+        } else if body["data"]["profile"].is_object() {
+            &body["data"]["profile"]
+        } else {
+            &Value::Null
+        };
+        let account = if body["account"].is_object() {
+            &body["account"]
+        } else if body["data"]["account"].is_object() {
+            &body["data"]["account"]
+        } else {
+            &Value::Null
+        };
+        let user_id = profile["userId"].as_i64()
+            .or_else(|| profile["user_id"].as_i64())
+            .or_else(|| profile["id"].as_i64())
+            .or_else(|| account["userId"].as_i64())
+            .or_else(|| account["id"].as_i64())
+            .unwrap_or(0);
+        let vip_type = account["vipType"].as_i64()
+            .or_else(|| profile["vipType"].as_i64())
+            .unwrap_or(0);
         Ok(json!({
             "loggedIn": user_id > 0,
             "userId": user_id,
-            "nickname": profile["nickname"],
-            "avatarUrl": profile["avatarUrl"],
+            "nickname": profile["nickname"].as_str().unwrap_or("网易云用户"),
+            "avatarUrl": profile["avatarUrl"].as_str().unwrap_or(""),
+            "vipType": vip_type,
+            "hasCookie": !cookie.is_empty(),
         }))
+    }
+
+    /// 手动导入网易云 cookie：验证 MUSIC_U → 保存 → 查询登录态 → 降级返回
+    async fn login_cookie(&self, params: &Value) -> Result<Value, String> {
+        let raw = params["cookie"].as_str().unwrap_or("");
+        if parse_cookie_value(raw, "MUSIC_U").is_none() {
+            return Ok(json!({
+                "loggedIn": false,
+                "error": "INVALID_NETEASE_COOKIE",
+                "message": "网易云 cookie 缺少 MUSIC_U"
+            }));
+        }
+        self.set_cookie(raw);
+        let cookie = self.get_cookie();
+        match self.login_status(&cookie).await {
+            Ok(info) if info["loggedIn"].as_bool() == Some(true) => {
+                Ok(json!({
+                    "loggedIn": true,
+                    "userId": info["userId"],
+                    "nickname": info["nickname"],
+                    "avatarUrl": info["avatarUrl"],
+                    "saved": true,
+                    "hasCookie": true,
+                }))
+            }
+            _ => {
+                // cookie 已保存但 profile 暂时获取不到，降级返回
+                Ok(json!({
+                    "loggedIn": true,
+                    "pendingProfile": true,
+                    "nickname": "网易云用户",
+                    "avatar": "",
+                    "vipType": 0,
+                    "saved": true,
+                    "hasCookie": true,
+                }))
+            }
+        }
     }
 
     async fn logout(&self, cookie: &str) -> Result<Value, String> {
@@ -667,9 +730,25 @@ impl OnlineApiState {
     // ---- user ----
 
     async fn user_playlists(&self, params: &Value, cookie: &str) -> Result<Value, String> {
-        let uid = params["uid"].as_i64().unwrap_or(0);
-        let limit = params["limit"].as_i64().unwrap_or(50);
+        let mut uid = params["uid"].as_i64().unwrap_or(0);
+        let limit = params["limit"].as_i64().unwrap_or(60);
         let offset = params["offset"].as_i64().unwrap_or(0);
+
+        // uid 未传时，自动从登录态获取
+        if uid == 0 {
+            match self.login_status(cookie).await {
+                Ok(info) if info["loggedIn"].as_bool() == Some(true) => {
+                    uid = info["userId"].as_i64().unwrap_or(0);
+                }
+                _ => {
+                    return Ok(json!({"loggedIn": false, "playlists": []}));
+                }
+            }
+        }
+        if uid == 0 {
+            return Ok(json!({"loggedIn": false, "playlists": []}));
+        }
+
         let data = json!({
             "uid": uid,
             "limit": limit,
@@ -677,29 +756,45 @@ impl OnlineApiState {
             "includeVideo": true,
         });
         let res = self.weapi_request("/api/user/playlist", data, cookie).await?;
-        Ok(json!({"playlist": res["body"]["playlist"]}))
+        let playlist = res["body"]["playlist"].as_array().cloned().unwrap_or_default();
+        let mapped: Vec<Value> = playlist.iter().map(|pl| {
+            json!({
+                "id": pl["id"],
+                "name": pl["name"],
+                "cover": pl["coverImgUrl"],
+                "trackCount": pl["trackCount"],
+                "playCount": pl["playCount"],
+                "creator": pl["creator"]["nickname"],
+                "subscribed": pl["subscribed"],
+                "specialType": pl["specialType"],
+            })
+        }).collect();
+        Ok(json!({"loggedIn": true, "playlists": mapped}))
     }
 
     async fn playlist_tracks(&self, params: &Value, cookie: &str) -> Result<Value, String> {
         // Use playlist_detail endpoint to get songs
-        let id = params["id"].as_i64().unwrap_or(0);
+        let id = value_as_id(&params["id"]);
         let data = json!({"id": id, "n": 100000, "s": 8});
-        let res = self.eapi_request("/api/v6/playlist/detail", data, cookie).await?;
+        let res = self.weapi_request("/api/v6/playlist/detail", data, cookie).await?;
         let body = &res["body"];
+        let tracks = body["playlist"]["tracks"].as_array().cloned().unwrap_or_default();
+        let mapped: Vec<Value> = tracks.iter().map(|s| map_netease_song(s)).collect();
         Ok(json!({
-            "songs": body["playlist"]["tracks"],
+            "songs": mapped,
+            "tracks": mapped,
             "privileges": body["privileges"],
         }))
     }
 
     async fn playlist_track_all(&self, params: &Value, cookie: &str) -> Result<Value, String> {
-        let id = params["id"].as_i64().unwrap_or(0);
+        let id = value_as_id(&params["id"]);
         let limit = params["limit"].as_i64().unwrap_or(300) as usize;
         let offset = params["offset"].as_i64().unwrap_or(0) as usize;
 
         // Step 1: get trackIds from playlist detail
         let data = json!({"id": id, "n": 100000, "s": 8});
-        let res = self.eapi_request("/api/v6/playlist/detail", data, cookie).await?;
+        let res = self.weapi_request("/api/v6/playlist/detail", data, cookie).await?;
         let track_ids = res["body"]["playlist"]["trackIds"]
             .as_array()
             .ok_or("no trackIds")?;
@@ -715,15 +810,17 @@ impl OnlineApiState {
                 .join(",")
         );
         let data2 = json!({"c": c_value});
-        let res2 = self.eapi_request("/api/v3/song/detail", data2, cookie).await?;
-        Ok(json!({"songs": res2["body"]["songs"]}))
+        let res2 = self.weapi_request("/api/v3/song/detail", data2, cookie).await?;
+        let songs = res2["body"]["songs"].as_array().cloned().unwrap_or_default();
+        let mapped2: Vec<Value> = songs.iter().map(|s| map_netease_song(s)).collect();
+        Ok(json!({"songs": mapped2, "tracks": mapped2}))
     }
 
-    async fn playlist_detail(&self, params: &Value, cookie: &str) -> Result<Value, String> {
-        let id = params["id"].as_i64().unwrap_or(0);
-        let data = json!({"id": id, "n": 100000, "s": 8});
-        let res = self.eapi_request("/api/v6/playlist/detail", data, cookie).await?;
-        Ok(json!({"playlist": res["body"]["playlist"]}))
+async fn playlist_detail(&self, params: &Value, cookie: &str) -> Result<Value, String> {
+let id = value_as_id(&params["id"]);
+let data = json!({"id": id, "n": 100000, "s": 8});
+let res = self.weapi_request("/api/v6/playlist/detail", data, cookie).await?;
+Ok(json!({"playlist": res["body"]["playlist"]}))
     }
 
     async fn playlist_add_song(&self, params: &Value, cookie: &str) -> Result<Value, String> {
@@ -1336,13 +1433,6 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
             .unwrap_or("(none)")
             .to_string();
 
-        eprintln!(
-            "[QQ_DEBUG] ptqrshow status={}, ct={}, qrsig={}, location={}",
-            status, content_type,
-            if qrsig.is_empty() { "no" } else { "yes" },
-            location
-        );
-
         let bytes = resp
             .bytes()
             .await
@@ -1384,8 +1474,6 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
         // Store qrsig for later polling
         *self.qq_qrsig.lock().unwrap() = qrsig.clone();
         *self.qq_login_cookies.lock().unwrap() = format!("qrsig={}", qrsig);
-
-        eprintln!("[QQ_DEBUG] ptqrshow success! qrsig={}", qrsig);
 
         Ok(json!({
             "key": qrsig,
@@ -1457,25 +1545,12 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
             .await
             .map_err(|e| format!("QQ QR check read error: {}", e))?;
 
-        eprintln!(
-            "[QQ_DEBUG] ptqrlogin status={}, cookies_len={}, body_len={}, body_preview={}",
-            resp_status,
-            all_cookies.len(),
-            resp_text.len(),
-            &resp_text.chars().take(200).collect::<String>()
-        );
-
         // Parse the JSONP response: ptuiCB('code','status','url','flag','msg','nick')
         let parsed = parse_ptui_cb(&resp_text);
         let code = parsed.code;
         let nick = parsed.nick.clone();
         let msg = parsed.msg.clone();
         let redirect_url = parsed.url.clone();
-
-        eprintln!(
-            "[QQ_DEBUG] ptqrlogin code={}, nick={}, msg={}, url={}",
-            code, nick, msg, redirect_url
-        );
 
         // Check for Chinese text in response as a fallback (like the reference)
         let is_expired = resp_text.contains("已失效");
@@ -1505,7 +1580,6 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
                 && redirect_url != "0"
                 && (redirect_url.starts_with("http://") || redirect_url.starts_with("https://"))
             {
-                eprintln!("[QQ_DEBUG] following check_sig URL: {}", redirect_url);
                 if let Ok(redir_resp) = check_client
                     .get(&redirect_url)
                     .header(
@@ -1518,11 +1592,6 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
                     .await
                 {
                     let redir_cookies = extract_set_cookies(&redir_resp);
-                    eprintln!(
-                        "[QQ_DEBUG] check_sig redirect status={}, cookies_len={}",
-                        redir_resp.status(),
-                        redir_cookies.len()
-                    );
                     for part in redir_cookies.split("; ") {
                         if part.is_empty() {
                             continue;
@@ -1541,10 +1610,6 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
             }
 
             let full_cookie = cookie_parts.join("; ");
-            eprintln!(
-                "[QQ_DEBUG] login success! cookie_len={}",
-                full_cookie.len()
-            );
             self.set_qq_cookie(&full_cookie);
 
             return Ok(json!({
@@ -1571,10 +1636,6 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
             }));
         } else {
             // Unknown code (e.g. 7 = parameter error, or HTTP 403 body)
-            eprintln!(
-                "[QQ_DEBUG] ptqrlogin unexpected code={}, msg={}",
-                code, msg
-            );
             let message = if !msg.is_empty() {
                 msg
             } else if resp_status.as_u16() != 200 {
@@ -2431,6 +2492,13 @@ fn value_as_string(v: &Value) -> Option<String> {
         Value::Number(n) => Some(n.to_string()),
         _ => None,
     }
+}
+
+/// 从 Value 解析 id：兼容 i64 和字符串形式的数字
+fn value_as_id(v: &Value) -> i64 {
+    v.as_i64()
+        .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+        .unwrap_or(0)
 }
 
 fn param_as_i64(params: &Value, key: &str, default: i64) -> i64 {

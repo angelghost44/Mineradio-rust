@@ -45,6 +45,53 @@ async function apiJsonTauri(url, opts) {
     if (pn === '/api/update/latest' && MR.sidecar) {
       return await MR.sidecar.call('check_update');
     }
+    // 歌曲URL：多音质降级探测（对齐原版 handleSongUrl 逻辑）
+    if (pn === '/api/song/url' && MR.sidecar) {
+      var songId = u.searchParams.get('id');
+      var qualityPref = (u.searchParams.get('quality') || 'hires').toLowerCase();
+      var NETEASE_QUALITY_CANDIDATES = [
+        { level: 'jymaster', br: 1999000, label: '超清母带', svip: true },
+        { level: 'hires',    br: 1999000, label: '高清臻音' },
+        { level: 'lossless', br: 1411000, label: '无损' },
+        { level: 'exhigh',   br: 999000,  label: '极高' },
+        { level: 'standard', br: 128000,  label: '标准' },
+      ];
+      var normMap = { jymaster:'jymaster', master:'jymaster', studio:'jymaster', svip:'jymaster',
+        hires:'hires','hi-res':'hires', highres:'hires', zhenyin:'hires', spatial:'hires',
+        lossless:'lossless', flac:'lossless', sq:'lossless',
+        exhigh:'exhigh', high:'exhigh', '320':'exhigh', '320k':'exhigh', hq:'exhigh',
+        standard:'standard', normal:'standard', '128':'standard', '128k':'standard', std:'standard' };
+      var target = normMap[qualityPref] || 'hires';
+      var startIdx = NETEASE_QUALITY_CANDIDATES.findIndex(function(q){ return q.level === target; });
+      if (startIdx < 0) startIdx = 1;
+      var candidates = NETEASE_QUALITY_CANDIDATES.slice(startIdx);
+      var trialFallback = null;
+      var lastData = null;
+      for (var qi = 0; qi < candidates.length; qi++) {
+        var q = candidates[qi];
+        try {
+          var result = null;
+          try {
+            result = await MR.sidecar.call('song_url_v1', { id: parseInt(songId, 10) || 0, level: q.level });
+          } catch(e) {
+            result = await MR.sidecar.call('song_url', { id: parseInt(songId, 10) || 0, br: q.br });
+          }
+          var d = result && result.data ? (Array.isArray(result.data) ? result.data[0] : result.data) : null;
+          if (!d && result && result.url) d = result;
+          if (d) lastData = d;
+          var url = d && d.url;
+          var freeTrial = d && d.freeTrialInfo;
+          if (url && !freeTrial) {
+            return { url: url, trial: false, playable: true, level: q.level, quality: q.label, br: d.br, id: songId };
+          }
+          if (url && freeTrial && !trialFallback) {
+            trialFallback = { url: url, trial: true, playable: true, level: q.level, quality: q.label, br: d.br, id: songId, freeTrialInfo: freeTrial };
+          }
+        } catch(e) {}
+      }
+      if (trialFallback) return trialFallback;
+      return { url: null, playable: false, id: songId, reason: 'url_unavailable', message: '没有返回可播放地址，可能是版权、会员或地区限制', lastData: lastData };
+    }
     if (MR.sidecar) {
       var method = tauriRouteToMethod(pn);
       if (method) {
@@ -68,7 +115,7 @@ function tauriRouteToMethod(pn) {
     '/api/lyric':'lyric','/api/lyric/new':'lyric_new',
     '/api/login/qr/key':'login_qr_key','/api/login/qr/create':'login_qr_create',
     '/api/login/qr/check':'login_qr_check','/api/login/status':'login_status',
-    '/api/login/cookie':'get_cookie','/api/logout':'logout',
+    '/api/login/cookie':'login_cookie','/api/logout':'logout',
     '/api/user/playlists':'user_playlists','/api/playlist/tracks':'playlist_tracks',
     '/api/playlist/track/all':'playlist_track_all','/api/playlist/detail':'playlist_detail',
     '/api/playlist/add-song':'playlist_add_song','/api/playlist/create':'playlist_create',
@@ -1004,10 +1051,15 @@ function updateEmptyHomeVisibility(opts) {
   var show = shouldShowEmptyHome();
   emptyHomeActive = show;
   document.body.classList.toggle('empty-home-active', show);
-  if (!show) setHomeControlsLocked(false);
+  if (!show) {
+    setHomeControlsLocked(false);
+    document.body.classList.remove('home-preparing');
+  }
   if (show) activateHomeWallpaperPreview();
   else deactivateHomeWallpaperPreview(false);
   if (show) {
+    // 先标记 preparing，让 CSS 隐藏内容，等布局完成后再显示
+    document.body.classList.add('home-preparing');
     setPeek(document.getElementById('search-area'), true, 'search');
     renderHomeDiscover();
     scheduleHomeWeatherLoad(opts.forceLoad ? 1400 : 2400);
@@ -1024,6 +1076,12 @@ function updateEmptyHomeVisibility(opts) {
       renderHomeDiscover();
       scheduleVisualApply(function(){ loadHomeDiscover(!!opts.forceLoad); }, 220, 1200);
     }
+    // 双 rAF 确保布局完成后再移除 preparing
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){
+        document.body.classList.remove('home-preparing');
+      });
+    });
   }
   return show;
 }
