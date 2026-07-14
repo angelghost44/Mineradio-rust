@@ -644,6 +644,7 @@ function normalizeCustomBackgroundImage(value) {
   if (!src) return '';
   if (/^data:image\/(png|jpe?g|webp);base64,/i.test(src)) return src;
   if (/^https?:\/\//i.test(src)) return src;
+  if (/^(asset|tauri):\/\//i.test(src)) return src;
   return '';
 }
 function normalizeCustomBackgroundMedia(value) {
@@ -663,7 +664,7 @@ function normalizeCustomBackgroundMedia(value) {
   if (type === 'video') {
     var src = String(value.src || '').trim();
     var id = String(value.id || '').trim();
-    if (!id && !/^data:video\/(mp4|webm|quicktime);base64,/i.test(src) && !/^https?:\/\//i.test(src)) return null;
+    if (!id && !/^data:video\/(mp4|webm|quicktime);base64,/i.test(src) && !/^https?:\/\//i.test(src) && !/^(asset|tauri):\/\//i.test(src)) return null;
     return {
       type: 'video',
       id: id,

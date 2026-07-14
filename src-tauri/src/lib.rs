@@ -11,6 +11,8 @@ mod online_api;
 mod scanner;
 pub mod state;
 mod wallpaper;
+mod wallpaper_pkg;
+mod we_control;
 
 pub struct OnlineApiState(pub online_api::OnlineApiState);
 
@@ -172,6 +174,13 @@ pub fn run() {
             crate::lyrics::set_lyrics_hot_bounds,
             crate::wallpaper::toggle_wallpaper_mode,
             crate::wallpaper::update_wallpaper_mode,
+            crate::wallpaper_pkg::import_wallpaper_pkg,
+            crate::we_control::find_we,
+            crate::we_control::list_we_wallpapers,
+            crate::we_control::open_we_wallpaper,
+            crate::we_control::sync_we_window,
+            crate::we_control::control_we,
+            crate::we_control::close_we_wallpaper,
             crate::login::open_netease_music_login,
             crate::login::open_qq_music_login,
             crate::login::clear_netease_music_login,
@@ -201,8 +210,21 @@ pub fn run() {
                         tauri::PhysicalPosition::new(x, y),
                     ));
                 }
-                let _ = window.set_background_color(Some(tauri::window::Color(8, 9, 11, 255)));
-                let _ = window.show();
+            // 主窗口透明由 tauri.conf.json 的 transparent:true 控制，
+            // 不再设不透明底色，否则会盖掉透明、无法透出 WE 窗口。
+            let _ = window.show();
+
+            // 原生窗口事件监听：替代前端轮询 sync_we_window，减少 IPC 延迟
+            let win2 = window.clone();
+            let _ = window.on_window_event(move |event| {
+                if let tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) = event {
+                    let _ = win2.inner_size().map(|sz| {
+                        let _ = win2.hwnd().map(|h| {
+                            crate::we_control::sync_bg(h.0, sz.width, sz.height);
+                        });
+                    });
+                }
+            });
             }
 
             Ok(())
@@ -210,5 +232,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|_app_handle, _event| {});
+    app.run(|_app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            #[cfg(target_os = "windows")] { crate::we_control::hide_bg_window(); }
+            crate::we_control::kill_we_child_processes();
+        }
+    });
 }

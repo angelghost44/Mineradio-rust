@@ -55,3 +55,9 @@ build/
 # Local documentation (not committed)
 doc/
 docs/
+resource/
+.gitnexus
+
+# GitNexus local vector index (local-only, not committed)
+.gitnexus/
+.claude

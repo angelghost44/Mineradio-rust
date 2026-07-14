@@ -32,6 +32,8 @@ hex = "0.4"
 ecb = { version = "0.1", features = ["alloc"] }
 md5 = "0.7"
 qrcode = "0.14"
+sysinfo = "0.38.4"
+windows = { version = "0.62", features = ["Win32_Graphics_Dwm", "Win32_Foundation"] }
 
 [features]
 default = ["custom-protocol"]

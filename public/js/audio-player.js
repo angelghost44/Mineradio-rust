@@ -1532,6 +1532,8 @@ function setPlayIcon(p) {
   document.getElementById('play-icon').innerHTML = p
     ? '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'
     : '<path d="M8 5v14l11-7z"/>';
+  // 供 WE 嵌入背景等模块解耦监听播放状态
+  try { document.dispatchEvent(new CustomEvent('mr-playstate', { detail: { playing: !!p } })); } catch (_) {}
 }
 function nextTrack() {
   if (!playQueue.length) return;

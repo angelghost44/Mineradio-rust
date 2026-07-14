@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../public",
     "devUrl": "http://localhost:8080",
-    "beforeDevCommand": "python -m http.server 8080 --directory ../public",
+      "beforeDevCommand": "python -m http.server 8080 --directory D:/project/Mineradio-rust/public",
     "beforeBuildCommand": ""
   },
   "app": {
@@ -22,7 +22,7 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
         "visible": false
       }
     ],

@@ -941,10 +941,12 @@ function readBackgroundVideoFile(file) {
 }
 function readBackgroundMediaFile(file) {
   if (!file) return;
+  if (/\.pkg$/i.test(file.name || '')) { showToast('暂不支持 .pkg 外部导入；请用「WE 壁纸库」选择已安装的壁纸'); return; }
   if (/^image\//i.test(file.type || '')) readBackgroundImageFile(file);
   else if (/^video\//i.test(file.type || '')) readBackgroundVideoFile(file);
   else showToast('请选择图片或视频文件');
 }
+
 function applyUiAccentColor() {
   var color = normalizeHexColor(fx.uiAccentColor || '#ffffff', '#ffffff');
   var rgb = hexToRgb(color);
