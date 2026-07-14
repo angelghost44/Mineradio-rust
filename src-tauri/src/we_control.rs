@@ -435,7 +435,9 @@ pub fn get_we_video_path(project_json: String) -> Option<String> {
 pub fn close_we_wallpaper() -> Result<(), String> {
     #[cfg(target_os = "windows")] { crate::we_control::win::hide_we_window(); }
     kill_we_child_processes();
-    if let Some(exe) = find_we_exe() { let _ = run_control(&exe, &["-control", "closeWallpaper"]); }
+    // Don't send generic -control closeWallpaper — that would close ALL
+    // wallpapers in WE (including the user's main wallpaper).  Killing
+    // the MusicPlayerBG child process and hiding the window is sufficient.
     Ok(())
 }
 
