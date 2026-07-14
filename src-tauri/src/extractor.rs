@@ -9,12 +9,6 @@ pub struct CoverData {
     pub cache_key: String,
 }
 
-impl CoverData {
-    pub fn to_data_url(&self) -> String {
-        format!("data:{};base64,{}", self.mime, self.data)
-    }
-}
-
 pub fn extract_cover(path: &str) -> Result<Option<CoverData>, String> {
     let file_path = Path::new(path);
     if !file_path.exists() {

@@ -13,6 +13,8 @@ body.custom-background-video #custom-bg::before{opacity:0!important}
 body.we-background #custom-bg{background:transparent!important}
 body.we-background #custom-bg::before{opacity:0!important}
 body.we-background #custom-bg::after{opacity:0!important}
+/* Web 类型壁纸切换时遮罩闪白/黑：极淡半透明层 + transition 平滑过渡 */
+body.we-background #content::before{content:'';position:fixed;inset:0;background:rgba(0,0,0,.03);pointer-events:none;z-index:1;transition:opacity .25s ease}
 /* 封面背景层在 WE 模式下会盖住透明洞，需隐藏 */
 body.we-background #album-bg{display:none!important}
 
@@ -21,15 +23,6 @@ body.we-background #album-bg{display:none!important}
 .we-bg-status{font-size:12px;color:rgba(255,255,255,.55);line-height:1.4}
 .we-bg-status.ok{color:#7fe0a8}
 .we-bg-status.warn{color:#ffb86b}
-.we-bg-actions{display:flex;gap:8px;flex-wrap:wrap}
-.we-bg-list{display:flex;flex-direction:column;gap:6px;margin-top:2px;max-height:240px;overflow:auto}
-.we-bg-list[style*="display:none"]{display:none}
-.we-bg-empty{font-size:12px;color:rgba(255,255,255,.4);padding:6px 0}
-.we-bg-item{display:flex;align-items:center;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);cursor:pointer;transition:background .15s,border-color .15s}
-.we-bg-item:hover{background:rgba(255,255,255,.08);border-color:rgba(var(--fc-accent-rgb),.3)}
-.we-bg-item-meta{display:flex;flex-direction:column;gap:2px;min-width:0}
-.we-bg-item-title{font-size:13px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.we-bg-item-type{font-size:11px;color:rgba(255,255,255,.45)}
 .we-picker-modal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(6,8,12,.62);backdrop-filter:blur(6px)}
 /* 明确的外层面板：有可见边框/圆角/阴影，读起来是“浮起对话框”而非内容糊在遮罩上 */
 .we-picker-panel{display:flex;flex-direction:column;width:min(880px,92vw);max-height:84vh;background:rgba(16,20,28,.94);border:1px solid rgba(var(--fc-accent-rgb,255,255,255),.28);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.55);overflow:hidden;backdrop-filter:blur(10px)}

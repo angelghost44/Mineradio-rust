@@ -1,12 +1,7 @@
-// we-bg.js — Wallpaper Engine 嵌入背景（方案 B：CLI 控制 + 窗口同步）
-// 依赖：tauri-bridge.js 提供的全局 MR.invoke（封装 Tauri v2 invoke）。
-// 行为：用户选中 WE 壁纸后，Rust 端用 wallpaper32/64.exe -control
-// openWallpaper -playInWindow 创建纯渲染窗口，本模块通过 sync_we_window
-// 把它对齐到主窗口客户区（Rust 端取屏幕坐标），并透出主窗口 #custom-bg 透明洞。
 (function () {
   'use strict';
 
-  var currentFile = null;   // 当前打开的 project_json 路径
+  var currentFile = null;
   var loopRaf = 0;
   var lastSync = 0;
   var available = false;
@@ -25,17 +20,16 @@
     s.className = 'we-bg-status' + (kind ? ' ' + kind : '');
   }
 
-  // 当前 Mineradio 是否处于播放态（play-icon 为双竖条=播放）。
   function isPlaying() {
     var ic = el('play-icon');
     return !!(ic && ic.innerHTML && ic.innerHTML.indexOf('rect') >= 0);
   }
 
-  // 把 WE 窗口对齐到主窗口（Rust 端取坐标，循环校正直到窗口出现）。
   function syncOnce() {
-    if (!currentFile) return;
-    invoke('sync_we_window', {}).catch(function (e) {
+    if (!currentFile) return Promise.reject();
+    return invoke('sync_we_window', {}).catch(function (e) {
       console.warn('[we-bg] sync 失败', e);
+      throw e;
     });
   }
 
@@ -43,7 +37,7 @@
     if (!currentFile) { loopRaf = 0; return; }
     if (!lastSync || ts - lastSync >= 2000) {
       lastSync = ts;
-      syncOnce();
+      syncOnce().catch(function () {});
     }
     loopRaf = requestAnimationFrame(loop);
   }
@@ -55,27 +49,53 @@
     if (loopRaf) { cancelAnimationFrame(loopRaf); loopRaf = 0; }
   }
 
-  function setControls(open) {
-    if (el('we-bg-open')) el('we-bg-open').style.display = open ? 'none' : '';
-    if (el('we-bg-close')) el('we-bg-close').style.display = open ? '' : 'none';
+  function openWallpaper(item) {
+    currentFile = item.project_json;
+    // 视频类型直接本地渲染，不走 WE 引擎
+    if (item.type === 'video' && item.file) {
+      invoke('get_we_video_path', { projectJson: item.project_json }).then(function (absPath) {
+        if (!absPath) { fallbackToWe(item); return; }
+        document.body.classList.add('we-background');
+        var bg = document.getElementById('we-bg-video') || (function () {
+          var v = document.createElement('video');
+          v.id = 'we-bg-video';
+          v.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;object-fit:cover;z-index:-1';
+          v.muted = true;
+          v.loop = true;
+          v.playsInline = true;
+          document.body.insertBefore(v, document.body.firstChild);
+          return v;
+        })();
+        bg.src = MR.convertFileSrc(absPath);
+        bg.play().catch(function () {});
+      }).catch(function () { fallbackToWe(item); });
+      return;
+    }
+    fallbackToWe(item);
   }
 
-  function openWallpaper(item) {
+  function fallbackToWe(item) {
     currentFile = item.project_json;
     invoke('open_we_wallpaper', { projectJson: item.project_json })
       .then(function () {
-        document.body.classList.add('we-background');
-        setControls(true);
-        startLoop();
-        syncOnce();
-        // 视频类默认静音，防双声。
+        // 快速轮询等待 WE 窗口就绪，旧背景在切换前一直可见
+        var retries = 0;
+        function waitReady() {
+          syncOnce().then(function () {
+            document.body.classList.add('we-background');
+            startLoop();
+          }).catch(function () {
+            if (++retries < 60) setTimeout(waitReady, 100);
+          });
+        }
+        waitReady();
         invoke('control_we', { action: 'mute' }).catch(function () {});
         invoke('control_we', { action: isPlaying() ? 'play' : 'pause' }).catch(function () {});
       })
       .catch(function (e) {
         currentFile = null;
         console.warn('[we-bg] open 失败', e);
-        setStatus('打开失败：' + (e && e.message ? e.message : e), 'warn');
+        setStatus('打开失败' + (e && e.message ? e.message : e), 'warn');
       });
   }
 
@@ -84,51 +104,13 @@
     currentFile = null;
     stopLoop();
     document.body.classList.remove('we-background');
-    setControls(false);
+    var v = document.getElementById('we-bg-video');
+    if (v) { v.pause(); v.src = ''; v.parentNode.removeChild(v); }
     invoke('close_we_wallpaper', {}).catch(function (e) {
       console.warn('[we-bg] close 失败', e);
     });
   }
 
-  function renderList(list) {
-    var box = el('we-bg-list');
-    if (!box) return;
-    box.innerHTML = '';
-    if (!list || !list.length) {
-      box.innerHTML = '<div class="we-bg-empty">未找到壁纸（创意工坊/WE 项目目录）</div>';
-      return;
-    }
-    list.forEach(function (item) {
-      var row = document.createElement('div');
-      row.className = 'we-bg-item';
-      var meta = document.createElement('div');
-      meta.className = 'we-bg-item-meta';
-      var title = document.createElement('div');
-      title.className = 'we-bg-item-title';
-      title.textContent = item.title || '(未命名)';
-      var type = document.createElement('span');
-      type.className = 'we-bg-item-type';
-      type.textContent = item.type || '?';
-      meta.appendChild(title);
-      meta.appendChild(type);
-      row.appendChild(meta);
-      row.addEventListener('click', function () { openWallpaper(item); });
-      box.appendChild(row);
-    });
-  }
-
-  function loadList() {
-    var box = el('we-bg-list');
-    if (box) box.innerHTML = '<div class="we-bg-empty">加载中…</div>';
-    invoke('list_we_wallpapers', {})
-      .then(function (list) { renderList(list || []); })
-      .catch(function (e) {
-        console.warn('[we-bg] list 失败', e);
-        if (box) box.innerHTML = '<div class="we-bg-empty">列表失败：' + (e && e.message ? e.message : e) + '</div>';
-      });
-  }
-
-  // 252 按钮：弹出 WE 壁纸库弹窗（带预览缩略图），选一项即打开。
   function openWePicker() {
     if (typeof MR === 'undefined' || !MR.invoke) {
       showToast && showToast('非 Tauri 环境，WE 不可用');
@@ -136,8 +118,6 @@
     }
     var modal = el('we-picker');
     if (!modal) return;
-    // 移出侧边栏：侧边栏含 transform/overflow，会使其变成 fixed 的定位包含块
-    // 并裁切弹窗，必须挂到 body 才能覆盖整个主窗口。
     if (modal.parentNode !== document.body) document.body.appendChild(modal);
     modal.innerHTML =
       '<div class="we-picker-panel">' +
@@ -175,16 +155,23 @@
       var disabled = !item.project_json;
       if (disabled) card.className += ' disabled';
       var thumb = document.createElement('div');
-      thumb.className = 'we-picker-thumb' + (item.preview ? '' : ' no-img');
-      if (item.preview) {
-        var im = document.createElement('img');
-        im.src = item.preview; // base64 data URL，由 Rust 端生成
-        im.alt = item.title || '';
-        im.loading = 'lazy';
-        thumb.appendChild(im);
-      } else {
+      thumb.className = 'we-picker-thumb no-img';
+      thumb.textContent = '加载中…';
+      invoke('get_we_preview', { projectJson: item.project_json }).then(function (dataUrl) {
+        if (dataUrl) {
+          thumb.textContent = '';
+          thumb.className = 'we-picker-thumb';
+          var im = document.createElement('img');
+          im.src = dataUrl;
+          im.alt = item.title || '';
+          im.loading = 'lazy';
+          thumb.appendChild(im);
+        } else {
+          thumb.textContent = '无预览';
+        }
+      }).catch(function () {
         thumb.textContent = '无预览';
-      }
+      });
       var title = document.createElement('div');
       title.className = 'we-picker-title';
       title.textContent = item.title || '(未命名)';
@@ -194,6 +181,14 @@
       card.appendChild(thumb);
       card.appendChild(title);
       card.appendChild(type);
+      card.style.position = 'relative';
+      var badge = item.file && item.type === 'video' ? (function () {
+        var b = document.createElement('span');
+        b.textContent = '视频';
+        b.style.cssText = 'position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;pointer-events:none';
+        return b;
+      })() : null;
+      if (badge) card.appendChild(badge);
       if (!disabled) {
         card.addEventListener('click', function () {
           closeWePicker();
@@ -204,7 +199,6 @@
     });
   }
 
-  // 播放/暂停联动：Mineradio 播放状态变化时同步到 WE 窗口。
   function onPlayState(e) {
     if (!currentFile) return;
     var playing = !!(e && e.detail && e.detail.playing);
@@ -214,21 +208,6 @@
   }
 
   function init() {
-    var openBtn = el('we-bg-open');
-    var closeBtn = el('we-bg-close');
-    if (openBtn) openBtn.addEventListener('click', function () {
-      var box = el('we-bg-list');
-      if (box) {
-        if (box.style.display === 'none' || !box.childElementCount) {
-          box.style.display = '';
-          loadList();
-        } else {
-          box.style.display = 'none';
-        }
-      }
-    });
-    if (closeBtn) closeBtn.addEventListener('click', closeWallpaper);
-
     document.addEventListener('mr-playstate', onPlayState);
 
     if (typeof MR === 'undefined' || !MR.invoke) {
@@ -240,7 +219,6 @@
         available = !!(res && res.available);
         if (available) {
           setStatus('已检测到 Wallpaper Engine', 'ok');
-          setControls(false);
         } else {
           setStatus('未检测到 Wallpaper Engine（功能不可用）', 'warn');
         }
@@ -257,13 +235,11 @@
     init();
   }
 
-  // 程序关闭时停止循环，避免 webview 销毁时仍调 Tauri 命令导致卡死。
   window.addEventListener('beforeunload', function () {
     stopLoop();
     currentFile = null;
   });
 
-  // 暴露给调试/外部调用。
   window.MR = window.MR || {};
   window.MR.weBackground = {
     open: openWallpaper,

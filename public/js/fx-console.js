@@ -876,6 +876,7 @@ function setCustomBackgroundImage(src, silent) {
 }
 function clearCustomBackgroundImage() {
   setCustomBackgroundImage('');
+  if (window.MR && window.MR.weBackground) window.MR.weBackground.close();
 }
 function setCustomBackgroundMedia(media, silent) {
   media = normalizeCustomBackgroundMedia(media);

@@ -12,6 +12,7 @@ pub struct WeWallpaper {
     pub r#type: String,
     pub preview: Option<String>,
     pub project_json: String,
+    pub file: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -30,25 +31,9 @@ mod win {
     const SWP_NOACTIVATE: u32 = 0x0010;
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_NOSIZE: u32 = 0x0001;
-    const SWP_ASYNCWINDOWPOS: u32 = 0x4000;
     const SWP_SHOWWINDOW: u32 = 0x0040;
     const SWP_NOSENDCHANGING: u32 = 0x0400;
     const HWND_TOP: *mut c_void = 0 as *mut c_void;
-
-    #[allow(non_snake_case)]
-    #[repr(C)]
-    struct WNDCLASSW {
-        style: u32,
-        lpfnWndProc: Option<unsafe extern "system" fn(*mut c_void, u32, usize, isize) -> isize>,
-        cbClsExtra: i32,
-        cbWndExtra: i32,
-        hInstance: *mut c_void,
-        hIcon: *mut c_void,
-        hCursor: *mut c_void,
-        hbrBackground: *mut c_void,
-        lpszMenuName: *const u16,
-        lpszClassName: *const u16,
-    }
 
     #[link(name = "user32")]
     extern "system" {
@@ -64,11 +49,6 @@ mod win {
         fn GetWindowRect(hwnd: *mut c_void, lpRect: *mut windows::Win32::Foundation::RECT) -> i32;
         fn GetClientRect(hwnd: *mut c_void, lpRect: *mut windows::Win32::Foundation::RECT) -> i32;
         fn ClientToScreen(hwnd: *mut c_void, lpPoint: *mut windows::Win32::Foundation::POINT) -> i32;
-        fn RegisterClassW(lpWndClass: *const WNDCLASSW) -> u16;
-        fn CreateWindowExW(dwExStyle: u32, lpClassName: *const u16, lpWindowName: *const u16, dwStyle: u32, x: i32, y: i32, nWidth: i32, nHeight: i32, hWndParent: *mut c_void, hMenu: *mut c_void, hInstance: *mut c_void, lpParam: *mut c_void) -> *mut c_void;
-        fn DestroyWindow(hwnd: *mut c_void) -> i32;
-        fn DefWindowProcW(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize;
-        fn GetModuleHandleW(lpModuleName: *const u16) -> *mut c_void;
         fn SetWindowPos(hwnd: *mut c_void, hWndInsertAfter: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
         fn SetWindowLongPtrW(hwnd: *mut c_void, nIndex: i32, dwNewLong: isize) -> isize;
     }
@@ -168,21 +148,11 @@ mod win {
             if GetClientRect(main_hwnd, &mut cr) != 0 && ClientToScreen(main_hwnd, &mut pt) != 0 {
                 let cw = (cr.right - cr.left) as u32;
                 let ch = (cr.bottom - cr.top) as u32;
-                let mut lx = LAST_X.lock().unwrap();
-                let mut ly = LAST_Y.lock().unwrap();
-                let mut lw = LAST_W.lock().unwrap();
-                let mut lh = LAST_H.lock().unwrap();
-                let px = lx.map(|v| v != pt.x).unwrap_or(true);
-                let py = ly.map(|v| v != pt.y).unwrap_or(true);
-                let sx = lw.map(|v| v != cw).unwrap_or(true);
-                let sy = lh.map(|v| v != ch).unwrap_or(true);
-                if px || py || sx || sy {
-                    unsafe {
-                        SetWindowPos(we_hwnd, main_hwnd, pt.x, pt.y, cw as i32, ch as i32, SWP_NOACTIVATE | SWP_NOSENDCHANGING);
-                    }
-                    *lx = Some(pt.x); *ly = Some(pt.y);
-                    *lw = Some(cw); *lh = Some(ch);
-                }
+                SetWindowPos(we_hwnd, main_hwnd, pt.x, pt.y, cw as i32, ch as i32, SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+                *LAST_X.lock().unwrap() = Some(pt.x);
+                *LAST_Y.lock().unwrap() = Some(pt.y);
+                *LAST_W.lock().unwrap() = Some(cw);
+                *LAST_H.lock().unwrap() = Some(ch);
             }
         }
 
@@ -337,11 +307,11 @@ fn parse_wallpaper(json_path: &Path) -> Option<WeWallpaper> {
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
     let title = v.get("title").and_then(|t| t.as_str()).unwrap_or("未命名壁纸").to_string();
     let r#type = v.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string();
-    let preview = v.get("preview").and_then(|p| p.as_str()).and_then(|rel| preview_data_url(json_path.parent().unwrap_or(json_path), rel));
-    Some(WeWallpaper { title, r#type, preview, project_json: json_path.to_string_lossy().to_string() })
+    let file = v.get("file").and_then(|f| f.as_str()).map(|s| s.to_string());
+    Some(WeWallpaper { title, r#type, preview: None, project_json: json_path.to_string_lossy().to_string(), file })
 }
 
-fn placeholder_wallpaper(json_path: &Path) -> WeWallpaper { WeWallpaper { title: "（壁纸数据缺失）".into(), r#type: String::new(), preview: None, project_json: json_path.to_string_lossy().to_string() } }
+fn placeholder_wallpaper(json_path: &Path) -> WeWallpaper { WeWallpaper { title: "（壁纸数据缺失）".into(), r#type: String::new(), preview: None, project_json: json_path.to_string_lossy().to_string(), file: None } }
 
 fn scan_dir(dir: &Path, out: &mut Vec<WeWallpaper>) {
     if !dir.is_dir() { return; }
@@ -368,7 +338,18 @@ fn count_wallpaper_dirs() -> usize {
     c
 }
 
-fn cache_path(app: &AppHandle) -> PathBuf { app.path().app_data_dir().map(|d| d.join("we_wallpapers_cache.json")).unwrap_or_else(|_| std::env::temp_dir().join("we_wallpapers_cache.json")) }
+fn cache_path(_app: &AppHandle) -> PathBuf {
+    // 优先 exe 目录（卸载时随安装目录一起清理），失败则 temp
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join("we_wallpapers_cache.json");
+            // 检查目录是否可写（非 Program Files 等只读位置）
+            let test = dir.join(".we_cache_test");
+            if std::fs::write(&test, "").is_ok() { let _ = std::fs::remove_file(&test); return p; }
+        }
+    }
+    std::env::temp_dir().join("we_wallpapers_cache.json")
+}
 fn read_cache(path: &Path) -> Option<Vec<WeWallpaper>> { let text = std::fs::read_to_string(path).ok()?; serde_json::from_str(&text).ok() }
 fn write_cache(path: &Path, items: &[WeWallpaper]) { if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); } if let Ok(json) = serde_json::to_string(items) { let _ = std::fs::write(path, json); } }
 
@@ -427,6 +408,27 @@ pub fn control_we(action: String) -> Result<(), String> {
     let exe = ensure_we_running()?;
     let sub = match action.as_str() { "play"=>"play", "pause"=>"pause", "mute"=>"mute", "unmute"=>"unmute", "close"=>"closeWallpaper", other=>return Err(format!("不支持的 WE 控制动作: {}", other)) };
     run_control(&exe, &["-control", sub])
+}
+
+#[tauri::command]
+pub fn get_we_preview(project_json: String) -> Option<String> {
+    let path = std::path::Path::new(&project_json);
+    let dir = path.parent()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let rel = v.get("preview")?.as_str()?;
+    preview_data_url(dir, rel)
+}
+
+#[tauri::command]
+pub fn get_we_video_path(project_json: String) -> Option<String> {
+    let path = std::path::Path::new(&project_json);
+    let dir = path.parent()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let rel = v.get("file")?.as_str()?;
+    let abs = dir.join(rel);
+    if abs.is_file() { Some(abs.to_string_lossy().to_string()) } else { None }
 }
 
 #[tauri::command]

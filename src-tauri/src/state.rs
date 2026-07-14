@@ -19,14 +19,18 @@ impl Default for AppData {
     }
 }
 
-fn state_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("failed to get app data dir: {}", e))?;
-
+fn state_path(_app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let test = dir.join(".state_test");
+            if std::fs::write(&test, "").is_ok() {
+                let _ = std::fs::remove_file(&test);
+                return Ok(dir.join("state.json"));
+            }
+        }
+    }
+    let dir = _app_handle.path().app_data_dir().map_err(|e| format!("failed to get app data dir: {}", e))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create state dir: {}", e))?;
-
     Ok(dir.join("state.json"))
 }
 

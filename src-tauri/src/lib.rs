@@ -180,6 +180,8 @@ pub fn run() {
             crate::we_control::open_we_wallpaper,
             crate::we_control::sync_we_window,
             crate::we_control::control_we,
+            crate::we_control::get_we_preview,
+            crate::we_control::get_we_video_path,
             crate::we_control::close_we_wallpaper,
             crate::login::open_netease_music_login,
             crate::login::open_qq_music_login,

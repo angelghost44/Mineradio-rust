@@ -51,6 +51,8 @@ src-tauri/update-key.pem.pub
 # kachina-builder packaging (build outputs & config)
 kachina.config.json
 build/
+.kachina-tmp/
+*_x64-setup.exe
 
 # Local documentation (not committed)
 doc/
