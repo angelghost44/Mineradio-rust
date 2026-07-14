@@ -1288,6 +1288,7 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
                 json!({
                     "id": item["id"].as_i64().or_else(|| item["songid"].as_i64()).unwrap_or(0),
                     "mid": mid,
+                    "mediaMid": item["media_mid"].as_str().or_else(|| item["mediaMid"].as_str()).unwrap_or(mid),
                     "name": item["name"].as_str().or_else(|| item["songname"].as_str()).unwrap_or(""),
                     "artist": item["singer"]
                         .as_array()
@@ -1310,35 +1311,70 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
 
     async fn qq_song_url(&self, params: &Value) -> Result<Value, String> {
         let mid = params["mid"].as_str().unwrap_or("");
-        let media_mid = params["mediaMid"].as_str().unwrap_or(mid);
+        let media_mid_raw = params["mediaMid"].as_str().unwrap_or("");
+        let media_mid = if media_mid_raw.is_empty() { mid } else { media_mid_raw };
         if mid.is_empty() {
-            return Ok(json!({"url": ""}));
+            return Ok(json!({"url": "", "playable": false, "reason": "url_unavailable", "message": "缺少歌曲 MID"}));
         }
-        let filename = format!("C400{}.m4a", media_mid);
-        let data = self
-            .qq_fetch(
-                "/base/fcgi-bin/fcg_music_express_mobile3.fcg",
-                &[
-                    ("cid", "205361747"),
-                    ("songmid", mid),
-                    ("filename", &filename),
-                    ("guid", "0"),
-                ],
-            )
-            .await?;
-        let item = &data["data"]["items"][0];
-        let vkey = item["vkey"].as_str().unwrap_or("");
-        let fn_val = item["filename"].as_str().unwrap_or(&filename);
-        let fromtag = item["fromtag"].as_i64().unwrap_or(66);
-        let url = if !vkey.is_empty() {
-            format!(
-                "https://dl.stream.qqmusic.qq.com/{}?vkey={}&guid=0&fromtag={}",
-                fn_val, vkey, fromtag
-            )
+        let quality = params["quality"].as_str().unwrap_or("exhigh").to_lowercase();
+        let (prefix, ext, br, label) = match quality.as_str() {
+            "standard" => ("C400", "m4a", 128000, "标准"),
+            "exhigh" => ("M800", "mp3", 320000, "极高"),
+            "lossless" => ("F000", "flac", 1411000, "无损"),
+            "hires" => ("F000", "flac", 1411000, "Hi-Res"),
+            "jymaster" => ("A000", "m4a", 1999000, "母带"),
+            _ => ("M800", "mp3", 320000, "极高"),
+        };
+        let filename = format!("{}{}.{}", prefix, media_mid, ext);
+        let payload = json!({
+            "req_0": {
+                "module": "vkey.GetVkeyServer",
+                "method": "CgiGetVkey",
+                "param": {
+                    "guid": "0",
+                    "songmid": [mid],
+                    "songtype": [0],
+                    "uin": "0",
+                    "loginflag": 1,
+                    "platform": "20",
+                    "filename": [filename]
+                }
+            },
+            "comm": {
+                "uin": 0,
+                "format": "json",
+                "ct": 24,
+                "cv": 0
+            }
+        });
+        let data = self.qq_musicu_request(&payload, true).await?;
+        let sip_list = data["req_0"]["data"]["sip"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let sip = sip_list
+            .first()
+            .and_then(|v| v.as_str())
+            .unwrap_or("https://dl.stream.qqmusic.qq.com/");
+        let info = &data["req_0"]["data"]["midurlinfo"][0];
+        let purl = info["purl"].as_str().unwrap_or("");
+        let vkey = info["vkey"].as_str().unwrap_or("");
+        let url = if !purl.is_empty() {
+            let base = sip.trim_end_matches('/');
+            format!("{}/{}", base, purl.trim_start_matches('/'))
         } else {
             String::new()
         };
-        Ok(json!({"url": url, "vkey": vkey}))
+        let playable = !url.is_empty();
+        Ok(json!({
+            "url": url,
+            "playable": playable,
+            "level": if playable { quality.as_str() } else { "" },
+            "quality": label,
+            "br": if playable { br } else { 0 },
+            "vkey": vkey,
+            "mid": mid
+        }))
     }
 
     async fn qq_lyric(&self, params: &Value) -> Result<Value, String> {
@@ -2635,7 +2671,10 @@ fn map_qq_track(track: &Value, fallback: &Value) -> Value {
     let artists_json = if !artists.is_empty() { json!(artists) } else { fallback["artists"].clone() };
 
     let media_mid = track["file"]["media_mid"].as_str()
+        .or_else(|| track["file"]["strMediaMid"].as_str())
         .or_else(|| track["strMediaMid"].as_str())
+        .or_else(|| track["media_mid"].as_str())
+        .or_else(|| track["mediaMid"].as_str())
         .unwrap_or("");
 
     let qq_id = value_as_string(&track["id"])
