@@ -39,9 +39,16 @@ pub async fn open_netease_music_login(app: AppHandle) -> Result<serde_json::Valu
 }
 
 /// Open a web login window for QQ Music.
+/// Uses the QQ Connect/xlogin page directly so the QR code is for account
+/// login, not the "download QQ" prompt shown on the y.qq.com profile page.
 #[tauri::command]
 pub async fn open_qq_music_login(app: AppHandle) -> Result<serde_json::Value, String> {
-    open_login_window(&app, LoginProvider::QQ, "https://y.qq.com/portal/profile.html").await
+    open_login_window(
+        &app,
+        LoginProvider::QQ,
+        "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?appid=716027609&daid=383&pt_skey_valid=0&style=40&s_url=https%3A%2F%2Fy.qq.com%2Fportal%2Fprofile.html",
+    )
+    .await
 }
 
 /// Clear the Netease cookie.

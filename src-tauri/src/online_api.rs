@@ -1627,6 +1627,7 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
 
             // Follow the check_sig URL (from ptuiCB 3rd argument) to get
             // additional cookies like p_skey, pt4_token, skey, etc.
+            // check_client has redirect::none(), so we only get the first hop.
             if !redirect_url.is_empty()
                 && redirect_url != "0"
                 && (redirect_url.starts_with("http://") || redirect_url.starts_with("https://"))
@@ -1656,6 +1657,36 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
                         } else {
                             cookie_parts.push(part.to_string());
                         }
+                    }
+                }
+            }
+
+            // Also visit y.qq.com/portal/profile.html with the SSO cookies to
+            // trigger y.qq.com setting qqmusic_key (the OAuth redirect chain
+            // was not fully followed because check_client has redirect::none()).
+            let y_cookies = cookie_parts.join("; ");
+            if let Ok(y_resp) = self
+                .client
+                .get("https://y.qq.com/portal/profile.html")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Referer", "https://xui.ptlogin2.qq.com/")
+                .header("Cookie", &y_cookies)
+                .send()
+                .await
+            {
+                let y_set_cookies = extract_set_cookies(&y_resp);
+                for part in y_set_cookies.split("; ") {
+                    if part.is_empty() {
+                        continue;
+                    }
+                    let name = part.split('=').next().unwrap_or("");
+                    if let Some(idx) = cookie_parts
+                        .iter()
+                        .position(|p| p.split('=').next().unwrap_or("") == name)
+                    {
+                        cookie_parts[idx] = part.to_string();
+                    } else {
+                        cookie_parts.push(part.to_string());
                     }
                 }
             }
