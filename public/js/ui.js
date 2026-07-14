@@ -311,6 +311,7 @@ function updateLoginProviderUi() {
     : '使用 <b>网易云音乐 App</b> 扫码，可同步歌单、红心与播客。';
   if (shell) {
     shell.classList.remove('web-login-preview', 'qq-preview', 'netease-preview', 'logged-in');
+    if (isQQ) shell.classList.add('web-login-preview', 'qq-preview');
   }
   if (qqPanel) qqPanel.classList.toggle('show', isQQ && qqManualCookieOpen);
   if (qqCookieToggle) {
@@ -352,20 +353,10 @@ async function refreshQr(forceQr) {
   if (qrShell) qrShell.style.display = '';
   if (qrStatus) qrStatus.style.display = '';
   if (isQQ) {
-    var qqImgEl = document.getElementById('qr-img');
-    if (qqImgEl) qqImgEl.src = '';
+    var qqShell = document.getElementById('qr-shell');
+    if (qqShell) { qqShell.classList.add('web-login-preview', 'qq-preview'); qqShell.classList.remove('netease-preview'); }
     var qqSt = document.getElementById('qr-status');
-    if (qqSt) { qqSt.className = ''; qqSt.textContent = '正在获取 QQ 二维码…'; }
-    try {
-      var qqQr = await apiJson('/api/qq/login/qr/key');
-      if (!qqQr || !qqQr.img) throw new Error('获取 QQ 二维码失败');
-      qrKey = qqQr.key || 'qq_qrsig';
-      document.getElementById('qr-img').src = qqQr.img;
-      if (qqSt) { qqSt.className = ''; qqSt.textContent = '请使用 QQ App 扫码'; }
-      startQrPoll();
-    } catch (e) {
-      if (qqSt) { qqSt.textContent = '出错: ' + e.message; qqSt.className = 'fail'; }
-    }
+    if (qqSt) { qqSt.className = ''; qqSt.textContent = 'QQ 扫码已失效，请点击下方按钮打开官方网页登录（支持手机号+SMS）。也可使用手动导入。'; }
     return;
   }
   try {

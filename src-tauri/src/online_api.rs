@@ -306,7 +306,11 @@ impl OnlineApiState {
             "qq_login_cookie" => {
                 let c = params["cookie"].as_str().unwrap_or("");
                 self.set_qq_cookie(c);
-                Ok(json!({"ok": true}))
+                // Visit y.qq.com/profile with the cookie to pick up any
+                // HttpOnly cookies (e.g. qqmusic_key) that document.cookie
+                // couldn't read, then return real login status.
+                self.qq_bake_session().await?;
+                self.qq_login_status().await
             }
             "qq_login_status" => self.qq_login_status().await,
             "qq_logout" => {
@@ -1799,6 +1803,45 @@ async fn dj_hot(&self, params: &Value, cookie: &str) -> Result<Value, String> {
                 "profileUnavailable": true,
             })),
         }
+    }
+
+    /// Visit y.qq.com with the stored cookie to pick up HttpOnly cookies
+    /// (e.g. qqmusic_key) that document.cookie cannot read from the WebView.
+    async fn qq_bake_session(&self) -> Result<(), String> {
+        let cookie = self.get_qq_cookie();
+        if cookie.is_empty() {
+            return Ok(());
+        }
+        if let Ok(resp) = self
+            .client
+            .get("https://y.qq.com/portal/profile.html")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .header("Referer", "https://xui.ptlogin2.qq.com/")
+            .header("Cookie", &cookie)
+            .send()
+            .await
+        {
+            let set_cookies = extract_set_cookies(&resp);
+            if !set_cookies.is_empty() {
+                let mut parts: Vec<String> = cookie.split("; ").map(|s| s.to_string()).collect();
+                for part in set_cookies.split("; ") {
+                    if part.is_empty() {
+                        continue;
+                    }
+                    let name = part.split('=').next().unwrap_or("");
+                    if let Some(idx) = parts
+                        .iter()
+                        .position(|p| p.split('=').next().unwrap_or("") == name)
+                    {
+                        parts[idx] = part.to_string();
+                    } else {
+                        parts.push(part.to_string());
+                    }
+                }
+                self.set_qq_cookie(&parts.join("; "));
+            }
+        }
+        Ok(())
     }
 
     /// QQ 用户歌单：获取创建 + 收藏的歌单

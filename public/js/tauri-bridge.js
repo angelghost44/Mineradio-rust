@@ -155,6 +155,16 @@ window.MR = window.MR || {};
       });
     },
 
+    // ---- Login ----
+
+    openNeteaseMusicLogin: function () {
+      return tauri.core.invoke('open_netease_music_login');
+    },
+
+    openQQMusicLogin: function () {
+      return tauri.core.invoke('open_qq_music_login');
+    },
+
     // ---- Login cleanup ----
 
     clearNeteaseMusicLogin: function () {

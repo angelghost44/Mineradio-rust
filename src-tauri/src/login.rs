@@ -39,14 +39,16 @@ pub async fn open_netease_music_login(app: AppHandle) -> Result<serde_json::Valu
 }
 
 /// Open a web login window for QQ Music.
-/// Uses the QQ Connect/xlogin page directly so the QR code is for account
-/// login, not the "download QQ" prompt shown on the y.qq.com profile page.
+/// Opens the QQ Music new profile page. If not logged in, QQ Music redirects
+/// to a login page with phone-number/SMS and QR options; the QR tab is known
+/// to be broken (scan → download QQ app), so users should use phone login.
+/// After successful login the URL changes to y.qq.com where we extract cookies.
 #[tauri::command]
 pub async fn open_qq_music_login(app: AppHandle) -> Result<serde_json::Value, String> {
     open_login_window(
         &app,
         LoginProvider::QQ,
-        "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?appid=716027609&daid=383&pt_skey_valid=0&style=40&s_url=https%3A%2F%2Fy.qq.com%2Fportal%2Fprofile.html",
+        "https://y.qq.com/n/ryqq/profile",
     )
     .await
 }
@@ -72,9 +74,20 @@ async fn open_login_window(
     provider: LoginProvider,
     url: &str,
 ) -> Result<serde_json::Value, String> {
-    // If a login window is already open, reject
-    if app.get_webview_window(LOGIN_LABEL).is_some() {
-        return Err("登录窗口已打开".into());
+    // If a login window is already open, close it and clear its session
+    // so the next login can start fresh (WebView2 persists cookies across
+    // windows on the same origin).
+    if let Some(old) = app.get_webview_window(LOGIN_LABEL) {
+        let _ = old.clear_all_browsing_data();
+        let _ = old.close();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    // Also clear the backend cookie so the old session doesn't get re-saved
+    // if the WebView navigates to a logged-in page before the user logs in.
+    if provider == LoginProvider::QQ {
+        let state = app.state::<crate::OnlineApiState>();
+        state.0.set_qq_cookie("");
     }
 
     // Set the provider in shared state
@@ -107,7 +120,14 @@ async fn open_login_window(
 
     let app_for_load = app.clone();
 
-    let window = WebviewWindowBuilder::new(app, LOGIN_LABEL, WebviewUrl::External(parsed_url))
+    // Clear WebView2 browsing data for the login window so that y.qq.com
+    // doesn't immediately recognise the old session and skip the login page.
+    // We build with about:blank first, clear data, then navigate to the URL.
+    let about_url: tauri::Url = "about:blank"
+        .parse()
+        .map_err(|e: <tauri::Url as std::str::FromStr>::Err| e.to_string())?;
+
+    let window = WebviewWindowBuilder::new(app, LOGIN_LABEL, WebviewUrl::External(about_url))
         .title(title)
         .inner_size(1000.0, 700.0)
         .resizable(true)
@@ -164,6 +184,10 @@ async fn open_login_window(
         })
         .build()
         .map_err(|e| format!("failed to create login window: {}", e))?;
+
+    let _ = window.clear_all_browsing_data();
+    let target_url: tauri::Url = parsed_url;
+    let _ = window.navigate(target_url);
 
     // Clean up on manual window close
     let app_for_close = app.clone();
